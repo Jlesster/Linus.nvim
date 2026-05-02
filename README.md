@@ -1,4 +1,4 @@
-# jlesster.nvim
+# Linus.nvim
 
 Rich universal hover for Java, Go, C, and C++. Brings rust-analyzer-level hover
 help to jdtls, gopls, and clangd — type hierarchy, docs, implementations, and
@@ -13,12 +13,11 @@ a bundled keyword reference as a fallback when LSP returns nothing.
 
 ```lua
 {
-  dir = "~/projects/jlesster.nvim",
-  name = "jlesster",
+  "Jlesster/Linus.nvim",
   dependencies = { "lewis6991/hover.nvim" },
   ft = { "java", "go", "c", "cpp" },
   config = function()
-    require("jlesster").setup()
+    require("linus").setup()
   end,
 }
 ```
@@ -28,7 +27,7 @@ a bundled keyword reference as a fallback when LSP returns nothing.
 All options with defaults:
 
 ```lua
-require("jlesster").setup({
+require("linus").setup({
   priority               = 1010,    -- hover.nvim provider priority (> LSP default 1000)
   border                 = "single",
   max_width              = 80,
@@ -51,7 +50,7 @@ require("jlesster").setup({
 Point `keyword_overrides_path` at a Lua file that returns a table:
 
 ```lua
--- ~/.config/nvim/jlesster-overrides.lua
+-- ~/.config/nvim/linus-overrides.lua
 return {
   java = {
     MyAnnotation = "**`@MyAnnotation`** — does something specific to this project.",

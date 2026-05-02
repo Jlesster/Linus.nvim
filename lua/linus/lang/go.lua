@@ -1,6 +1,13 @@
 -- linus/lang/go.lua
 -- gopls enricher: hover with godoc formatting, type hierarchy, interface implementations.
--- Matches java.lua feature parity: structured doc parsing, retry_at_symbol, correct barrier accounting.
+--
+-- Hover parsing mirrors lang/java.lua exactly:
+--   parse_hover_result() handles all three LSP content shapes gopls may return
+--   (MarkupContent, MarkedString scalar, MarkedString[]), routes each through
+--   split_sig_docs() + format_docs(), and returns (sig_lines, doc_lines).
+--   fetch_hover() distinguishes "empty because keyword" from "empty because no
+--   symbol here" and only retries (retry_at_symbol) for the latter — same
+--   logic as jdtls in java.lua.
 
 local util = require("linus.lang.util")
 
@@ -9,6 +16,7 @@ local M = {}
 -- ── Keyword fast-path ─────────────────────────────────────────────────────────
 
 local GO_KEYWORDS = {
+  -- language keywords
   ["break"] = true,
   ["case"] = true,
   ["chan"] = true,
@@ -34,7 +42,7 @@ local GO_KEYWORDS = {
   ["switch"] = true,
   ["type"] = true,
   ["var"] = true,
-  -- built-in identifiers
+  -- built-in identifiers — gopls returns nothing useful for these
   ["append"] = true,
   ["cap"] = true,
   ["close"] = true,
@@ -78,7 +86,9 @@ local GO_KEYWORDS = {
   ["complex128"] = true,
 }
 
-local function word_at(line_text, col)
+-- Return the identifier whose character span contains col (0-indexed).
+-- Identical to word_containing() in java.lua.
+local function word_containing(line_text, col)
   local pos = 1
   while true do
     local s, e = line_text:find("[%a_][%w_]*", pos)
@@ -91,25 +101,45 @@ local function word_at(line_text, col)
   end
 end
 
--- ── Godoc formatting ──────────────────────────────────────────────────────────
+-- ── Hover parsing ─────────────────────────────────────────────────────────────
 
--- gopls returns hover as:
---   ```go
---   func Foo(x int) error
---   ```
---   Foo does something useful.
+-- gopls hover markdown: everything inside the first code fence is the
+-- signature; everything after the closing fence is the godoc comment.
+-- Identical structure to split_sig_docs() in java.lua.
+---@param text string
+---@return string sig_text, string docs_text
+local function split_sig_docs(text)
+  if not text or text == "" then return "", "" end
+
+  local sig_parts  = {}
+  local doc_parts  = {}
+  local in_fence   = false
+  local past_fence = false
+
+  for _, line in ipairs(vim.split(text, "\n", { plain = true })) do
+    if line:match("^```") then
+      in_fence = not in_fence
+      if not in_fence then past_fence = true end
+      table.insert(sig_parts, line)
+    elseif in_fence then
+      table.insert(sig_parts, line)
+    elseif past_fence then
+      table.insert(doc_parts, line)
+    else
+      table.insert(sig_parts, line)
+    end
+  end
+
+  return table.concat(sig_parts, "\n"), table.concat(doc_parts, "\n")
+end
+
+-- Turn raw godoc text into clean markdown lines.
+-- Mirrors the structure of format_docs() in java.lua.
 --
---   Parameters:
---     - x: the value
---
--- The signature part is handled by util.split_fence / util.to_lines.
--- This function formats the prose doc section (everything after the fence).
---
--- gopls doc sections we recognise:
---   "Parameters:\n  - name: desc"  (gopls >= 0.14 structured docs)
---   "@param name desc"              (rare, some older setups)
---   Plain prose paragraphs
---
+-- gopls emits two doc formats depending on version and symbol type:
+--   Modern (≥0.14):  "Parameters:\n  - name: desc\nReturns:\n  - desc"
+--   Legacy / manual: "@param name desc\n@returns desc"
+--   Plain prose:     no markers — returned as-is
 ---@param raw string
 ---@return string[]|nil
 local function format_docs(raw)
@@ -117,41 +147,30 @@ local function format_docs(raw)
 
   local lines = vim.split(raw, "\n", { plain = true })
 
-  -- Strip leading blank lines.
   while #lines > 0 and lines[1]:match("^%s*$") do table.remove(lines, 1) end
-  -- Strip trailing blank lines.
   while #lines > 0 and lines[#lines]:match("^%s*$") do table.remove(lines) end
-
   if #lines == 0 then return nil end
 
-  -- Fast path: if no structured section markers exist, return plain prose.
-  local joined             = table.concat(lines, "\n")
-  local has_params_section = joined:match("\nParameters:") or joined:match("^Parameters:")
-  local has_at_param       = joined:match("@param%s+%S")
-  local has_at_return      = joined:match("@returns?%s+")
+  local joined     = table.concat(lines, "\n")
 
-  if not has_params_section and not has_at_param and not has_at_return then
+  local has_modern = joined:match("\nParameters:") or joined:match("^Parameters:")
+      or joined:match("\nReturns?:") or joined:match("^Returns?:")
+  local has_legacy = joined:match("@param%s") or joined:match("@returns?%s")
+  local has_depr   = joined:match("\nDeprecated:") or joined:match("^Deprecated:")
+
+  -- Fast path: plain prose.
+  if not has_modern and not has_legacy and not has_depr then
     return lines
   end
 
-  -- Parse structured sections.
-  -- gopls structured format:
-  --   Parameters:
-  --     - name: description
-  --     - name: description
-  --   Returns:
-  --     - description
-  --   Deprecated: reason
-  --
-  -- We collect: desc[], params[], ret[], deprecated string
   local desc         = {}
-  local params       = {}
+  local params       = {} -- { name=string, desc=string }
   local ret_lines    = {}
   local deprecated   = nil
 
-  local STATE_DESC   = "desc"
-  local STATE_PARAMS = "params"
-  local STATE_RET    = "ret"
+  local STATE_DESC   = 1
+  local STATE_PARAMS = 2
+  local STATE_RET    = 3
   local state        = STATE_DESC
 
   for _, line in ipairs(lines) do
@@ -160,31 +179,54 @@ local function format_docs(raw)
       state = STATE_PARAMS
     elseif line:match("^Returns?:%s*$") then
       state = STATE_RET
+    elseif line:match("^Deprecated:%s*$") then
+      deprecated = ""
+      state = STATE_DESC
+
+      -- Inline "Deprecated: reason" (single-line form)
     elseif line:match("^Deprecated:%s*(.+)") then
       deprecated = line:match("^Deprecated:%s*(.+)")
-      state = STATE_DESC -- treat subsequent lines as desc again
-      -- gopls structured param line: "  - name: description"
+      state = STATE_DESC
+
+      -- Modern param line: "  - name: description"
     elseif state == STATE_PARAMS and line:match("^%s*%-%s*(%S+):%s*(.*)") then
       local pname, pdesc = line:match("^%s*%-%s*(%S+):%s*(.*)")
       table.insert(params, { name = pname, desc = pdesc or "" })
-      -- gopls structured return line: "  - description"
+
+      -- Modern return line: "  - description"
     elseif state == STATE_RET and line:match("^%s*%-%s*(.+)") then
       table.insert(ret_lines, line:match("^%s*%-%s*(.+)"))
-      -- @param fallback (older gopls / hand-written)
+
+      -- Legacy @param
     elseif line:match("^@param%s+(%S+)%s*(.*)") then
       local pname, pdesc = line:match("^@param%s+(%S+)%s*(.*)")
       state = STATE_PARAMS
       table.insert(params, { name = pname, desc = pdesc or "" })
+
+      -- Legacy @return / @returns
     elseif line:match("^@returns?%s+(.*)") then
       state = STATE_RET
       table.insert(ret_lines, line:match("^@returns?%s+(.*)"))
-      -- description accumulator
+
+      -- Description accumulator
     elseif state == STATE_DESC then
-      table.insert(desc, line)
+      if deprecated == "" and not line:match("^%s*$") then
+        deprecated = line -- first non-blank after bare "Deprecated:"
+      elseif deprecated == nil then
+        table.insert(desc, line)
+      end
+
+      -- Continuation: indented line extends last param or return entry
+    elseif state == STATE_PARAMS and line:match("^%s+") and #params > 0 then
+      params[#params].desc = params[#params].desc
+          .. " " .. line:match("^%s+(.*)")
+    elseif state == STATE_RET and line:match("^%s+") and #ret_lines > 0 then
+      ret_lines[#ret_lines] = ret_lines[#ret_lines]
+          .. " " .. line:match("^%s+(.*)")
     end
   end
 
-  -- Strip blank lines from the description tail.
+  while #desc > 0 and desc[1]:match("^%s*$") do table.remove(desc, 1) end
   while #desc > 0 and desc[#desc]:match("^%s*$") do table.remove(desc) end
 
   local out = {}
@@ -210,7 +252,7 @@ local function format_docs(raw)
     end
   end
 
-  if deprecated then
+  if deprecated and deprecated ~= "" then
     if #out > 0 then table.insert(out, "") end
     table.insert(out, "> **Deprecated:** " .. deprecated)
   end
@@ -219,11 +261,70 @@ local function format_docs(raw)
   return #out > 0 and out or nil
 end
 
--- ── LSP fetchers ───────────────────────────────────────────────────────────────
+-- ── LSP hover result parsing ───────────────────────────────────────────────────
 
--- When gopls hover returns nothing for a non-keyword position, scan ahead on the
+-- Parse any gopls hover result shape into (sig_lines, doc_lines).
+-- Mirrors parse_hover_result() in java.lua exactly, adapted for gopls:
+--
+--   MarkupContent  {kind="markdown", value="```go\nfunc...\n```\ngodoc"}
+--   MarkedString   "func Foo(...)" (plain string — older gopls)
+--   MarkedString[] [{language="go", value="func..."}, "godoc prose"]
+---@param result table|nil
+---@return string[]|nil sig_lines, string[]|nil doc_lines
+local function parse_hover_result(result)
+  if not result then return nil, nil end
+  local contents = result.contents
+  if not contents then return nil, nil end
+
+  -- MarkupContent {kind, value}
+  if type(contents) == "table" and contents.kind then
+    local raw = contents.value or ""
+    if raw == "" then return nil, nil end
+    local sig_text, docs_text = split_sig_docs(raw)
+    return sig_text ~= "" and util.to_lines(sig_text) or nil,
+        format_docs(docs_text)
+  end
+
+  -- MarkedString scalar
+  if type(contents) == "string" then
+    if contents == "" then return nil, nil end
+    local sig_text, docs_text = split_sig_docs(contents)
+    return sig_text ~= "" and util.to_lines(sig_text) or nil,
+        format_docs(docs_text)
+  end
+
+  -- MarkedString[] — wrap each code object in a language fence
+  if type(contents) == "table" then
+    local sig_lines = {}
+    local doc_parts = {}
+    for _, item in ipairs(contents) do
+      if type(item) == "table" and item.value and item.value ~= "" then
+        table.insert(sig_lines, "```" .. (item.language or "go"))
+        for _, l in ipairs(vim.split(item.value, "\n", { plain = true })) do
+          table.insert(sig_lines, l)
+        end
+        table.insert(sig_lines, "```")
+      elseif type(item) == "string" and item ~= "" then
+        table.insert(doc_parts, item)
+      end
+    end
+    while #sig_lines > 0 and sig_lines[#sig_lines]:match("^%s*$") do
+      table.remove(sig_lines)
+    end
+    local doc_lines = #doc_parts > 0
+        and format_docs(table.concat(doc_parts, "\n"))
+        or nil
+    return #sig_lines > 0 and sig_lines or nil, doc_lines
+  end
+
+  return nil, nil
+end
+
+-- ── fetch_hover + retry ────────────────────────────────────────────────────────
+
+-- When hover returns nothing for a non-keyword position, scan ahead on the
 -- same line for the first non-keyword identifier after the cursor and retry.
--- Mirrors java.lua's retry_at_symbol.
+-- Mirrors retry_at_symbol() in java.lua exactly.
 ---@param bufnr integer
 ---@param params table
 ---@param cb fun(sig: string[]|nil, docs: string[]|nil)
@@ -237,7 +338,7 @@ local function retry_at_symbol(bufnr, params, cb)
   while true do
     local s, e = line_text:find("[%a_][%w_]*", pos)
     if not s then break end
-    local word_col = s - 1 -- convert to 0-based
+    local word_col = s - 1 -- 0-based
     if word_col > col and not GO_KEYWORDS[line_text:sub(s, e)] then
       new_col = word_col
       break
@@ -253,51 +354,43 @@ local function retry_at_symbol(bufnr, params, cb)
   local new_params = vim.deepcopy(params)
   new_params.position.character = new_col
   util.std_request(bufnr, "gopls", "textDocument/hover", new_params, function(result)
-    if not result then
-      cb(nil, nil)
-      return
-    end
-    local raw       = util.extract_value(result.contents)
-    local sig, doc  = util.split_fence(raw)
-    local sig_lines = sig ~= "" and util.to_lines(sig) or nil
-    local doc_lines = format_docs(doc)
-    cb(sig_lines, doc_lines)
+    cb(parse_hover_result(result))
   end)
 end
 
+-- Fetch hover from gopls and route through parse_hover_result().
+-- Distinguishes three outcomes:
+--   got sig  → cb(sig_lines, doc_lines)
+--   keyword  → cb(nil, nil)  [let main.lua serve the keyword table]
+--   no-symbol non-keyword → retry_at_symbol
+-- Mirrors fetch_hover() in java.lua.
 ---@param bufnr integer
 ---@param params table
 ---@param cb fun(sig: string[]|nil, docs: string[]|nil)
 local function fetch_hover(bufnr, params, cb)
   util.std_request(bufnr, "gopls", "textDocument/hover", params, function(result)
-    if not result then
-      -- Nothing returned — cursor may be between tokens.  Try the next symbol.
-      retry_at_symbol(bufnr, params, cb)
-      return
-    end
-
-    local raw = util.extract_value(result.contents)
-    if raw == "" then
-      retry_at_symbol(bufnr, params, cb)
-      return
-    end
-
-    local sig, doc = util.split_fence(raw)
-    local sig_lines = sig ~= "" and util.to_lines(sig) or nil
-    local doc_lines = format_docs(doc)
-
+    local sig_lines, doc_lines = parse_hover_result(result)
     if sig_lines then
       cb(sig_lines, doc_lines)
-    else
-      retry_at_symbol(bufnr, params, cb)
+      return
     end
+
+    local col       = params.position.character
+    local line_nr   = params.position.line
+    local line_text = vim.api.nvim_buf_get_lines(bufnr, line_nr, line_nr + 1, false)[1] or ""
+    if GO_KEYWORDS[word_containing(line_text, col)] then
+      cb(nil, nil)
+      return
+    end
+
+    retry_at_symbol(bufnr, params, cb)
   end)
 end
 
+-- ── Type hierarchy ─────────────────────────────────────────────────────────────
+
 -- Resolve a display label from a gopls implementation location.
--- Tries to extract the type name from the target symbol if available,
--- falling back to file:line.
----@param loc table  LSP Location or LocationLink
+---@param loc table
 ---@return string
 local function loc_display(loc)
   local uri   = loc.uri or loc.targetUri or ""
@@ -305,14 +398,13 @@ local function loc_display(loc)
   local range = loc.range or loc.targetSelectionRange or { start = { line = 0 } }
   local line  = range.start.line
 
-  -- If the file is open, read the identifier at the target position directly.
   local fname = vim.uri_to_fname(uri)
   local buf   = vim.fn.bufnr(fname)
   if buf ~= -1 then
     local target_line = vim.api.nvim_buf_get_lines(buf, line, line + 1, false)[1]
     if target_line then
       local col   = range.start.character or 0
-      local ident = word_at(target_line, col)
+      local ident = word_containing(target_line, col)
       if ident and ident ~= "" then
         return ident .. "  `" .. base .. "`"
       end
@@ -345,10 +437,8 @@ local function fetch_implementations(bufnr, params, cb)
   end)
 end
 
--- Fetch supertypes and subtypes via a single prepareTypeHierarchy call.
--- Both on_super and on_subs are guaranteed to be called exactly once each,
--- which is required for correct barrier accounting in enrich().
--- gopls supports typeHierarchy since gopls 0.11 / Go 1.21.
+-- Run prepareTypeHierarchy once, fire supertypes and subtypes in parallel.
+-- on_super and on_subs are each called exactly once — required for barrier.
 ---@param bufnr integer
 ---@param params table
 ---@param cfg table
@@ -373,8 +463,6 @@ local function fetch_hierarchy(bufnr, params, cfg, on_super, on_subs)
 
     local item = items[1]
 
-    -- Both supertypes and subtypes run concurrently after prepare.
-    -- Each callback is always called exactly once — callers depend on this.
     if want_super then
       util.client_request(bufnr, "gopls", "typeHierarchy/supertypes",
         { item = item, resolve = 3 },
@@ -434,38 +522,34 @@ function M.enrich(bufnr, opts, done)
   local params    = util.pos_params(bufnr)
   local cfg       = require("linus").config
 
-  -- Keyword fast-path: skip all LSP work, let providers/main.lua serve the
-  -- built-in keyword reference.  Must happen before any request fires because
-  -- gopls can return hover for some keywords (e.g. built-in types), which
-  -- would compete with the keyword table lookup.
+  -- Fast-path for keywords: skip all LSP work and let main.lua serve the
+  -- built-in reference.  Must happen before any request fires because gopls
+  -- can return hover for built-in types, which would make data non-empty and
+  -- bypass the keyword lookup.
   local line_nr   = params.position.line
   local col       = params.position.character
   local line_text = vim.api.nvim_buf_get_lines(bufnr, line_nr, line_nr + 1, false)[1] or ""
-  if GO_KEYWORDS[word_at(line_text, col)] then
+  if GO_KEYWORDS[word_containing(line_text, col)] then
     done({})
     return
   end
 
-  -- Four concurrent async slots:
-  --   1. hover (fetch_hover — may internally retry)
-  --   2. hierarchy supertypes  ┐ both resolved inside fetch_hierarchy,
-  --   3. hierarchy subtypes    ┘ each calls tick() exactly once
+  -- Four async slots — barrier must be reached exactly 4 times:
+  --   1. hover
+  --   2. supertypes  ┐ both from fetch_hierarchy after one prepare call;
+  --   3. subtypes    ┘ each calls tick() independently
   --   4. textDocument/implementation
-  --
-  -- fetch_hierarchy issues two client_request calls (super + subs) but we
-  -- wrap their combined result into two separate tick() calls so the barrier
-  -- always reaches 4 exactly once, regardless of want_super / want_subs.
   local data = {}
   local tick = util.barrier(4, function() done(data) end)
 
-  -- ── Slot 1: hover ─────────────────────────────────────────────────────────
+  -- Slot 1
   fetch_hover(bufnr, params, function(sig_lines, doc_lines)
-    if sig_lines then data.signature = sig_lines end
-    if doc_lines then data.docs = doc_lines end
+    data.signature = sig_lines
+    data.docs      = doc_lines
     tick()
   end)
 
-  -- ── Slots 2 & 3: type hierarchy ───────────────────────────────────────────
+  -- Slots 2 + 3
   fetch_hierarchy(bufnr, params, cfg,
     function(supers)
       if #supers > 0 then data.hierarchy = supers end
@@ -480,22 +564,21 @@ function M.enrich(bufnr, opts, done)
     end
   )
 
-  -- ── Slot 4: interface implementations ─────────────────────────────────────
+  -- Slot 4
   if cfg.sections.implementations then
     fetch_implementations(bufnr, params, function(impls)
       if #impls > 0 then
         data.implementations = data.implementations or {}
-        -- merge without duplicates
         local seen = {}
         for _, v in ipairs(data.implementations) do seen[v] = true end
         for _, v in ipairs(impls) do
           if not seen[v] then table.insert(data.implementations, v) end
         end
       end
-      tick() -- slot 4
+      tick()
     end)
   else
-    tick() -- slot 4 (skipped)
+    tick()
   end
 end
 
