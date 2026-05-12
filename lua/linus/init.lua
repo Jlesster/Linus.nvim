@@ -21,6 +21,7 @@ local M = {}
 ---@field implements boolean       implements (interface parents, Java only)
 ---@field implementations boolean  known subtypes / interface impls
 ---@field fallback boolean
+---@field external_docs boolean    external documentation from cppreference.com
 
 local defaults = {
   priority               = 1010,
@@ -37,6 +38,7 @@ local defaults = {
     implements      = true,
     implementations = true,
     fallback        = true,
+    external_docs   = true,
   },
 }
 

@@ -146,6 +146,149 @@ local function is_keyword(ft, word)
   return C_KEYWORDS[word]
 end
 
+-- Cache for external documentation
+local external_docs_cache = {}
+
+-- Fetch external documentation from cppreference.com
+---@param symbol string
+---@param callback fun(lines: string[]|nil)
+local function fetch_external_docs(symbol, callback)
+  -- Check cache
+  if external_docs_cache[symbol] ~= nil then
+    callback(external_docs_cache[symbol])
+    return
+  end
+
+  -- We'll try to fetch from cppreference.com
+  -- Convert symbol to a URL: for example, "std::vector" -> "cpp/container/vector"
+  -- We need to map the symbol to a cppreference.com page.
+
+  -- This is a simplified mapping: we only handle a few cases for now.
+  -- We will implement a basic mapping for std::* symbols.
+
+  -- Remove the "std::" prefix if present
+  local prefix = "std::"
+  local name = symbol
+  if symbol:sub(1, #prefix) == prefix then
+    name = symbol:sub(#prefix+1)
+  end
+
+  -- We'll try to look up the page by using a predefined mapping or by trying to guess.
+  -- For now, we will only handle a few common symbols and return nil for others.
+
+  -- We'll make a simple mapping for demonstration.
+  local mapping = {
+    vector = "cpp/container/vector",
+    string = "cpp/string/basic_string",
+    ["shared_ptr"] = "cpp/memory/shared_ptr",
+    ["unique_ptr"] = "cpp/memory/unique_ptr",
+    map = "cpp/container/map",
+    set = "cpp/container/set",
+    ["iostream"] = "cpp/header/iostream",
+    ["printf"] = "c/io/fprintf", -- Note: printf is in c/io
+  }
+
+  local page = mapping[name]
+  if not page then
+    -- Try to guess: for example, if the symbol is in the std namespace, we assume it's in cpp/
+    if symbol:sub(1, #prefix) == prefix then
+      page = "cpp/" .. name -- This is likely wrong, but we try
+    else
+      -- Not in std, try as a C symbol in c/
+      page = "c/" .. name
+    end
+  end
+
+  local url = "https://en.cppreference.com/w/" .. page
+  -- Use the printable version to get a simpler HTML
+  url = url .. "?printable=yes"
+
+  -- We'll use vim.system to run curl
+  -- We assume curl is available and we are in an environment that allows shell commands.
+  -- We make the request asynchronous.
+  vim.system({ "curl", "-s", "-L", "--max-time", "5", url }, {}, function(obj)
+    if obj.code ~= 0 or not obj.stdout or obj.stdout == "" then
+      -- Cache the negative result to avoid repeated attempts
+      external_docs_cache[symbol] = false
+      callback(nil)
+      return
+    end
+
+    local html = obj.stdout
+
+    -- We'll try to extract the main content from the printable page.
+    -- The printable page has a div with id="mw-content-text"
+    -- We'll extract the content of that div and then convert to markdown very roughly.
+
+    -- Find the div
+    local start_idx = html:find('<div id="mw-content-text"')
+    if not start_idx then
+      external_docs_cache[symbol] = false
+      callback(nil)
+      return
+    end
+    start_idx = html:find('>', start_idx)
+    if not start_idx then
+      external_docs_cache[symbol] = false
+      callback(nil)
+      return
+    end
+    start_idx = start_idx + 1
+
+    -- Find the closing div
+    local end_idx = html:find('</div>', start_idx)
+    if not end_idx then
+      external_docs_cache[symbol] = false
+      callback(nil)
+      return
+    end
+
+    local content = html:sub(start_idx, end_idx)
+
+    -- Now we have the HTML content. We'll convert very basic HTML to markdown.
+    -- We'll remove tags and replace some with markdown equivalents.
+
+    -- We'll do a very simple conversion: remove tags and handle <p>, <li>, etc.
+    -- We'll split by<p> and then process each paragraph.
+
+    -- We'll use a series of gsubs to clean up.
+
+    -- Remove <script> and<style> tags
+    content = content:gsub('<script[^>]*>.*?</script>', ''):gsub('<style[^>]*>.*?</style>', '')
+    -- Remove HTML comments
+    content = content:gsub('<!--.*?-->','')
+
+    -- Replace <br> with newline
+    content = content:gsub('<br%s*/?>', '\n')
+    -- Replace </p> with two newlines
+    content = content:gsub('</p>', '\n\n')
+    -- Remove all other tags
+    content = content:gsub('<[^>]+>', '')
+
+    -- Decode HTML entities (very basic)
+    content = content:gsub('&lt;', '<'):gsub('&gt;', '>'):gsub('&amp;', '&'):gsub('&quot;', '"'):gsub('&#39;', "'")
+
+    -- Split into lines and remove empty lines at the start and end
+    local lines = {}
+    for line in content:gmatch('[^\n]+') do
+      line = line:gsub('^%s+', ''):gsub('%s+$', '')
+      if line ~= '' then
+        table.insert(lines, line)
+      end
+    end
+
+    -- Limit to a reasonable number of lines to avoid too much output
+    if #lines > 20 then
+      lines = { table.unpack(lines, 1, 20) }
+      table.insert(lines, "... (truncated)")
+    end
+
+    -- Cache the result
+    external_docs_cache[symbol] = lines
+    callback(lines)
+  end)
+end
+
 -- Return the identifier whose character span contains col (0-indexed).
 -- Handles # for preprocessor directives.
 -- Identical structure to word_containing() in java.lua.
@@ -658,24 +801,31 @@ function M.enrich(bufnr, opts, done)
   local cfg       = require("linus").config
   local ft        = vim.bo[bufnr].filetype
 
-  -- Fast-path for keywords: skip all LSP work and let main.lua serve the
-  -- built-in reference.  Must happen before any request fires.
+  -- Get the word under the cursor early for keyword check and external docs
   local line_nr   = params.position.line
   local col       = params.position.character
   local line_text = vim.api.nvim_buf_get_lines(bufnr, line_nr, line_nr + 1, false)[1] or ""
-  if is_keyword(ft, word_containing(line_text, col)) then
+  local word      = word_containing(line_text, col)
+
+  -- Fast-path for keywords: skip all LSP work and let main.lua serve the
+  -- built-in reference.  Must happen before any request fires.
+  if is_keyword(ft, word) then
     done({})
     return
   end
 
-  -- Five async slots — barrier must be reached exactly 5 times:
+  -- Determine if we should fetch external documentation
+  local fetch_external = cfg.sections.external_docs and word and word:find("^std::") ~= nil
+
+  -- Six async slots — barrier must be reached exactly 6 times:
   --   1. hover
   --   2. supertypes  ┐ both from fetch_hierarchy after one prepare call;
   --   3. subtypes    ┘ each calls tick() independently
   --   4. textDocument/implementation
   --   5. textDocument/symbolInfo (macro detection)
+  --   6. external documentation
   local data = {}
-  local tick = util.barrier(5, function() done(data) end)
+  local tick = util.barrier(6, function() done(data) end)
 
   -- Slot 1
   fetch_hover(bufnr, params, ft, function(sig_lines, doc_lines)
@@ -720,6 +870,18 @@ function M.enrich(bufnr, opts, done)
   if cfg.sections.extra ~= false then
     fetch_macro(bufnr, params, function(info)
       if info then data.extra = { info } end
+      tick()
+    end)
+  else
+    tick()
+  end
+
+  -- Slot 6: external documentation
+  if fetch_external and word then
+    fetch_external_docs(word, function(lines)
+      if lines then
+        data.external_docs = lines
+      end
       tick()
     end)
   else

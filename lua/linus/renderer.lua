@@ -44,6 +44,9 @@ function M.build(data, cfg)
   if s.signature       then append_section(out, nil,            data.signature)       end
   if s.docs            then append_section(out, nil,            data.docs)            end
   if data.extra        then append_section(out, nil,            data.extra)           end
+  if s.external_docs and data.external_docs then
+    append_section(out, "External Documentation", data.external_docs)
+  end
   if s.hierarchy       then append_list(out, "Extends",         data.hierarchy,       "↑") end
   if s.implements      then append_list(out, "Implements",      data.implements,      "~") end
   if s.implementations then append_list(out, "Known Subtypes",  data.implementations, "↓") end
