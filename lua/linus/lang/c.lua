@@ -146,144 +146,259 @@ local function is_keyword(ft, word)
   return C_KEYWORDS[word]
 end
 
+-- ── External Documentation Pipeline ───────────────────────────────────────────────
+
+-- Maps symbols to cppreference.com pages.
+local CPP_PAGE_MAPPING = {
+  -- Containers
+  vector = "cpp/container/vector",
+  string = "cpp/string/basic_string",
+  ["shared_ptr"] = "cpp/memory/shared_ptr",
+  ["unique_ptr"] = "cpp/memory/unique_ptr",
+  weak_ptr = "cpp/memory/weak_ptr",
+  array = "cpp/container/array",
+  deque = "cpp/container/deque",
+  forward_list = "cpp/container/forward_list",
+  list = "cpp/container/list",
+  map = "cpp/container/map",
+  multimap = "cpp/container/multimap",
+  set = "cpp/container/set",
+  multiset = "cpp/container/multiset",
+  unordered_map = "cpp/container/unordered_map",
+  unordered_multimap = "cpp/container/unordered_multimap",
+  unordered_set = "cpp/container/unordered_set",
+  unordered_multiset = "cpp/container/unordered_multiset",
+  stack = "cpp/container/stack",
+  queue = "cpp/container/queue",
+  priority_queue = "cpp/container/priority_queue",
+  span = "cpp/container/span",
+
+  -- Algorithms
+  sort = "cpp/algorithm/sort",
+  find = "cpp/algorithm/find",
+  binary_search = "cpp/algorithm/binary_search",
+  accumulate = "cpp/algorithm/accumulate",
+  for_each = "cpp/algorithm/for_each",
+  transform = "cpp/algorithm/transform",
+  copy = "cpp/algorithm/copy",
+  move = "cpp/algorithm/move",
+  swap = "cpp/algorithm/swap",
+
+  -- Utilities
+  pair = "cpp/utility/pair",
+  tuple = "cpp/utility/tuple",
+  optional = "cpp/utility/optional",
+  variant = "cpp/utility/variant",
+  any = "cpp/utility/any",
+  ["function"] = "cpp/utility/functional",
+  bind = "cpp/utility/functional/bind",
+  ref = "cpp/utility/functional/ref",
+
+  -- I/O
+  iostream = "cpp/header/iostream",
+  fstream = "cpp/header/fstream",
+  sstream = "cpp/header/sstream",
+  iomanip = "cpp/header/iomanip",
+  iosfwd = "cpp/header/iosfwd",
+  streambuf = "cpp/header/streambuf",
+
+  -- Threading
+  thread = "cpp/thread/thread",
+  mutex = "cpp/thread/mutex",
+  condition_variable = "cpp/thread/condition_variable",
+  future = "cpp/thread/future",
+  promise = "cpp/thread/promise",
+  atomic = "cpp/atomic/atomic",
+
+  -- Chrono
+  chrono = "cpp/chrono/chrono",
+  system_clock = "cpp/chrono/system_clock",
+  steady_clock = "cpp/chrono/steady_clock",
+  high_resolution_clock = "cpp/chrono/high_resolution_clock",
+  duration = "cpp/chrono/duration",
+  time_point = "cpp/chrono/time_point",
+
+  -- C standard library (in C++)
+  ["printf"] = "c/io/fprintf",
+  ["scanf"] = "c/io/scanf",
+  ["malloc"] = "c/memory/malloc",
+  ["free"] = "c/memory/free",
+  ["strlen"] = "c/string/byte/strlen",
+  ["strcpy"] = "c/string/byte/strcpy",
+  ["strcmp"] = "c/string/byte/strcmp",
+}
+
+---@param symbol string
+---@return string|nil
+local function resolve_cpp_url(symbol)
+  local prefix = "std::"
+  local name = symbol
+  if symbol:sub(1, #prefix) == prefix then
+    name = symbol:sub(#prefix + 1)
+  end
+
+  local page = CPP_PAGE_MAPPING[name]
+  if page then return page end
+
+  if symbol:sub(1, #prefix) == prefix then
+    -- Guessing order: container -> algorithm -> utility -> generic cpp/
+    local guesses = { "cpp/container/", "cpp/algorithm/", "cpp/utility/" }
+    for _, g in ipairs(guesses) do
+      return g .. name
+    end
+    return "cpp/" .. name
+  end
+
+  return "c/" .. name
+end
+
 -- Cache for external documentation
 local external_docs_cache = {}
+
+---@param html string
+---@return string|nil
+local function extract_main_content(html)
+  local start_idx = html:find('<div id="mw-content-text"')
+  if not start_idx then return nil end
+  start_idx = html:find('>', start_idx)
+  if not start_idx then return nil end
+  start_idx = start_idx + 1
+
+  local end_idx = html:find('</div>', start_idx)
+  if not end_idx then return nil end
+
+  return html:sub(start_idx, end_idx)
+end
+
+local HTML_REPLACEMENTS = {
+  -- Block elements
+  { '<h1[^>]*>', '# ' }, { '</h1>', '\n' },
+  { '<h2[^>]*>', '## ' }, { '</h2>', '\n' },
+  { '<h3[^>]*>', '### ' }, { '</h3>', '\n' },
+  { '<h4[^>]*>', '#### ' }, { '</h4>', '\n' },
+  { '<h5[^>]*>', '##### ' }, { '</h5>', '\n' },
+  { '<h6[^>]*>', '###### ' }, { '</h6>', '\n' },
+  { '<p[^>]*>', '\n' }, { '</p>', '\n' },
+  { '<ul[^>]*>', '\n' }, { '</ul>', '\n' },
+  { '<ol[^>]*>', '\n' }, { '</ol>', '\n' },
+  { '<li[^>]*>', '- ' }, { '</li>', '\n' },
+  { '<pre[^>]*>', '```\n' }, { '</pre>', '\n```\n' },
+  { '<code[^>]*>', '`' }, { '</code>', '`' },
+  { '<table[^>]*>', '\n' }, { '</table>', '\n' },
+  { '<thead[^>]*>', '\n' }, { '</thead>', '\n' },
+  { '<tbody[^>]*>', '\n' }, { '</tbody>', '\n' },
+  { '<tr[^>]*>', '\n' }, { '</tr>', '\n' },
+  { '<th[^>]*>', '| ' }, { '</th>', ' |' },
+  { '<td[^>]*>', '| ' }, { '</td>', ' |' },
+  { '<hr[%s/>]*>', '\n---\n' },
+  { '<br[%s/>]*>', '\n' },
+  { '<div[^>]*>', '\n' }, { '</div>', '\n' },
+  { '<span[^>]*>', '' }, { '</span>', '' },
+  -- Emphasis
+  { '<strong[^>]*>', '**' }, { '</strong>', '**' },
+  { '<b[^>]*>', '**' }, { '</b>', '**' },
+  { '<em[^>]*>', '*' }, { '</em>', '*' },
+  { '<i[^>]*>', '*' }, { '</i>', '*' },
+  { '<del[^>]*>', '~~' }, { '</del>', '~~' },
+  { '<ins[^>]*>', '__' }, { '</ins>', '__' },
+  { '<mark[^>]*>', '==' }, { '</mark>', '==' },
+}
+
+local ENTITY_REPLACEMENTS = {
+  ['&lt;'] = '<', ['&gt;'] = '>', ['&amp;'] = '&', ['&quot;'] = '"', ['&#39;'] = "'",
+  ['&nbsp;'] = ' ', ['&ldquo;'] = '"', ['&rdquo;'] = '"', ['&lsquo;'] = "'", ['&rsquo;'] = "'",
+}
+
+---@param content string
+---@return string[]|nil
+local function convert_html_to_markdown(content)
+  -- Remove high-noise elements first
+  content = content:gsub('<script[^>]*>.*?</script>', '')
+                :gsub('<style[^>]*>.*?</style>', '')
+                :gsub('<nav[^>]*>.*?</nav>', '')
+                :gsub('<header[^>]*>.*?</header>', '')
+                :gsub('<footer[^>]*>.*?</footer>', '')
+                :gsub('<aside[^>]*>.*?</aside>', '')
+                :gsub('<!--.*?-->', '')
+
+  -- Apply table-driven replacements
+  for _, rep in ipairs(HTML_REPLACEMENTS) do
+    content = content:gsub(rep[1], rep[2])
+  end
+
+  -- Handle links: <a href="URL">TEXT</a> -> TEXT (URL)
+  content = content:gsub('<a[^>]*href="([^"]*)"[^>]*>([^<]*)</a>', '%2 (%1)')
+  content = content:gsub('<a[^>]*>[^<]*</a>', '')
+
+  -- Strip any remaining tags
+  content = content:gsub('<[^>]+>', '')
+
+  -- Decode entities
+  for ent, val in pairs(ENTITY_REPLACEMENTS) do
+    content = content:gsub(ent, val)
+  end
+
+  local lines = {}
+  for line in content:gmatch('[^\n]+') do
+    line = line:gsub('^%s+', ''):gsub('%s+$', '')
+    if line ~= '' then table.insert(lines, line) end
+  end
+
+  -- Clean up consecutive empty lines (max 2)
+  local i = 2
+  while i <= #lines do
+    if lines[i] == '' and lines[i-1] == '' and lines[i-2] == '' then
+      table.remove(lines, i)
+    else
+      i = i + 1
+    end
+  end
+
+  while #lines > 0 and lines[1] == '' do table.remove(lines, 1) end
+  while #lines > 0 and lines[#lines] == '' do table.remove(lines) end
+
+  if #lines > 30 then
+    lines = { table.unpack(lines, 1, 30) }
+    table.insert(lines, "")
+    table.insert(lines, "... (truncated for brevity)")
+  end
+
+  return #lines > 0 and lines or nil
+end
 
 -- Fetch external documentation from cppreference.com
 ---@param symbol string
 ---@param callback fun(lines: string[]|nil)
 local function fetch_external_docs(symbol, callback)
-  -- Check cache
   if external_docs_cache[symbol] ~= nil then
     callback(external_docs_cache[symbol])
     return
   end
 
-  -- We'll try to fetch from cppreference.com
-  -- Convert symbol to a URL: for example, "std::vector" -> "cpp/container/vector"
-  -- We need to map the symbol to a cppreference.com page.
-
-  -- This is a simplified mapping: we only handle a few cases for now.
-  -- We will implement a basic mapping for std::* symbols.
-
-  -- Remove the "std::" prefix if present
-  local prefix = "std::"
-  local name = symbol
-  if symbol:sub(1, #prefix) == prefix then
-    name = symbol:sub(#prefix+1)
-  end
-
-  -- We'll try to look up the page by using a predefined mapping or by trying to guess.
-  -- For now, we will only handle a few common symbols and return nil for others.
-
-  -- We'll make a simple mapping for demonstration.
-  local mapping = {
-    vector = "cpp/container/vector",
-    string = "cpp/string/basic_string",
-    ["shared_ptr"] = "cpp/memory/shared_ptr",
-    ["unique_ptr"] = "cpp/memory/unique_ptr",
-    map = "cpp/container/map",
-    set = "cpp/container/set",
-    ["iostream"] = "cpp/header/iostream",
-    ["printf"] = "c/io/fprintf", -- Note: printf is in c/io
-  }
-
-  local page = mapping[name]
+  local page = resolve_cpp_url(symbol)
   if not page then
-    -- Try to guess: for example, if the symbol is in the std namespace, we assume it's in cpp/
-    if symbol:sub(1, #prefix) == prefix then
-      page = "cpp/" .. name -- This is likely wrong, but we try
-    else
-      -- Not in std, try as a C symbol in c/
-      page = "c/" .. name
-    end
+    external_docs_cache[symbol] = false
+    callback(nil)
+    return
   end
 
-  local url = "https://en.cppreference.com/w/" .. page
-  -- Use the printable version to get a simpler HTML
-  url = url .. "?printable=yes"
+  local url = "https://en.cppreference.com/w/" .. page .. "?printable=yes"
 
-  -- We'll use vim.system to run curl
-  -- We assume curl is available and we are in an environment that allows shell commands.
-  -- We make the request asynchronous.
-  vim.system({ "curl", "-s", "-L", "--max-time", "5", url }, {}, function(obj)
+  vim.system({ "curl", "-s", "-L", "--max-time", "8", url }, {}, function(obj)
     if obj.code ~= 0 or not obj.stdout or obj.stdout == "" then
-      -- Cache the negative result to avoid repeated attempts
       external_docs_cache[symbol] = false
       callback(nil)
       return
     end
 
-    local html = obj.stdout
-
-    -- We'll try to extract the main content from the printable page.
-    -- The printable page has a div with id="mw-content-text"
-    -- We'll extract the content of that div and then convert to markdown very roughly.
-
-    -- Find the div
-    local start_idx = html:find('<div id="mw-content-text"')
-    if not start_idx then
-      external_docs_cache[symbol] = false
-      callback(nil)
-      return
-    end
-    start_idx = html:find('>', start_idx)
-    if not start_idx then
-      external_docs_cache[symbol] = false
-      callback(nil)
-      return
-    end
-    start_idx = start_idx + 1
-
-    -- Find the closing div
-    local end_idx = html:find('</div>', start_idx)
-    if not end_idx then
+    local content = extract_main_content(obj.stdout)
+    if not content then
       external_docs_cache[symbol] = false
       callback(nil)
       return
     end
 
-    local content = html:sub(start_idx, end_idx)
-
-    -- Now we have the HTML content. We'll convert very basic HTML to markdown.
-    -- We'll remove tags and replace some with markdown equivalents.
-
-    -- We'll do a very simple conversion: remove tags and handle <p>, <li>, etc.
-    -- We'll split by<p> and then process each paragraph.
-
-    -- We'll use a series of gsubs to clean up.
-
-    -- Remove <script> and<style> tags
-    content = content:gsub('<script[^>]*>.*?</script>', ''):gsub('<style[^>]*>.*?</style>', '')
-    -- Remove HTML comments
-    content = content:gsub('<!--.*?-->','')
-
-    -- Replace <br> with newline
-    content = content:gsub('<br%s*/?>', '\n')
-    -- Replace </p> with two newlines
-    content = content:gsub('</p>', '\n\n')
-    -- Remove all other tags
-    content = content:gsub('<[^>]+>', '')
-
-    -- Decode HTML entities (very basic)
-    content = content:gsub('&lt;', '<'):gsub('&gt;', '>'):gsub('&amp;', '&'):gsub('&quot;', '"'):gsub('&#39;', "'")
-
-    -- Split into lines and remove empty lines at the start and end
-    local lines = {}
-    for line in content:gmatch('[^\n]+') do
-      line = line:gsub('^%s+', ''):gsub('%s+$', '')
-      if line ~= '' then
-        table.insert(lines, line)
-      end
-    end
-
-    -- Limit to a reasonable number of lines to avoid too much output
-    if #lines > 20 then
-      lines = { table.unpack(lines, 1, 20) }
-      table.insert(lines, "... (truncated)")
-    end
-
-    -- Cache the result
+    local lines = convert_html_to_markdown(content)
     external_docs_cache[symbol] = lines
     callback(lines)
   end)
@@ -307,36 +422,6 @@ end
 
 -- ── Hover parsing ─────────────────────────────────────────────────────────────
 
--- clangd hover markdown: everything inside the first code fence is the
--- signature; everything after the closing fence is the doxygen/prose doc.
--- Identical structure to split_sig_docs() in java.lua.
----@param text string
----@return string sig_text, string docs_text
-local function split_sig_docs(text)
-  if not text or text == "" then return "", "" end
-
-  local sig_parts  = {}
-  local doc_parts  = {}
-  local in_fence   = false
-  local past_fence = false
-
-  for _, line in ipairs(vim.split(text, "\n", { plain = true })) do
-    if line:match("^```") then
-      in_fence = not in_fence
-      if not in_fence then past_fence = true end
-      table.insert(sig_parts, line)
-    elseif in_fence then
-      table.insert(sig_parts, line)
-    elseif past_fence then
-      table.insert(doc_parts, line)
-    else
-      table.insert(sig_parts, line)
-    end
-  end
-
-  return table.concat(sig_parts, "\n"), table.concat(doc_parts, "\n")
-end
-
 -- Turn raw doxygen/prose text into clean markdown lines.
 -- Mirrors the structure of format_docs() in java.lua, extended for C/C++-specific
 -- Doxygen tags: @brief, @param [in/out/inout], @tparam, @return/@returns,
@@ -344,7 +429,7 @@ end
 --
 -- Two fast paths mirror java.lua:
 --   1. No doxygen markers → strip blanks and return plain prose.
---   2. Has markers → full parse into **Parameters**, **Returns**, etc.
+--   2ات la markers → full parse into **Parameters**, **Returns**, etc.
 ---@param raw string
 ---@return string[]|nil
 local function format_docs(raw)
@@ -542,67 +627,6 @@ local function format_docs(raw)
   return #out > 0 and out or nil
 end
 
--- ── LSP hover result parsing ───────────────────────────────────────────────────
-
--- Parse any clangd hover result shape into (sig_lines, doc_lines).
--- Mirrors parse_hover_result() in java.lua exactly, adapted for clangd.
---
--- clangd can return three distinct content formats:
---   MarkupContent  {kind="markdown", value="```cpp\nfunc...\n```\ndoxygen"}
---   MarkedString   "int foo(int x)" (plain string — older clangd)
---   MarkedString[] [{language="cpp", value="int foo(int x)"}, "doxygen prose"]
----@param result table|nil
----@param ft string  filetype for the language fence label
----@return string[]|nil sig_lines, string[]|nil doc_lines
-local function parse_hover_result(result, ft)
-  if not result then return nil, nil end
-  local contents = result.contents
-  if not contents then return nil, nil end
-
-  -- MarkupContent {kind, value}
-  if type(contents) == "table" and contents.kind then
-    local raw = contents.value or ""
-    if raw == "" then return nil, nil end
-    local sig_text, docs_text = split_sig_docs(raw)
-    return sig_text ~= "" and util.to_lines(sig_text) or nil,
-        format_docs(docs_text)
-  end
-
-  -- MarkedString scalar
-  if type(contents) == "string" then
-    if contents == "" then return nil, nil end
-    local sig_text, docs_text = split_sig_docs(contents)
-    return sig_text ~= "" and util.to_lines(sig_text) or nil,
-        format_docs(docs_text)
-  end
-
-  -- MarkedString[] — wrap each code object in a language fence
-  if type(contents) == "table" then
-    local sig_lines = {}
-    local doc_parts = {}
-    for _, item in ipairs(contents) do
-      if type(item) == "table" and item.value and item.value ~= "" then
-        table.insert(sig_lines, "```" .. (item.language or ft or "c"))
-        for _, l in ipairs(vim.split(item.value, "\n", { plain = true })) do
-          table.insert(sig_lines, l)
-        end
-        table.insert(sig_lines, "```")
-      elseif type(item) == "string" and item ~= "" then
-        table.insert(doc_parts, item)
-      end
-    end
-    while #sig_lines > 0 and sig_lines[#sig_lines]:match("^%s*$") do
-      table.remove(sig_lines)
-    end
-    local doc_lines = #doc_parts > 0
-        and format_docs(table.concat(doc_parts, "\n"))
-        or nil
-    return #sig_lines > 0 and sig_lines or nil, doc_lines
-  end
-
-  return nil, nil
-end
-
 -- ── fetch_hover + retry ────────────────────────────────────────────────────────
 
 -- When hover returns nothing for a non-keyword position, scan ahead on the
@@ -638,7 +662,7 @@ local function retry_at_symbol(bufnr, params, ft, cb)
   local new_params = vim.deepcopy(params)
   new_params.position.character = new_col
   util.std_request(bufnr, "clangd", "textDocument/hover", new_params, function(result)
-    cb(parse_hover_result(result, ft))
+    cb(util.parse_hover_result(result, ft, format_docs))
   end)
 end
 
@@ -653,7 +677,7 @@ end
 ---@param cb fun(sig: string[]|nil, docs: string[]|nil)
 local function fetch_hover(bufnr, params, ft, cb)
   util.std_request(bufnr, "clangd", "textDocument/hover", params, function(result)
-    local sig_lines, doc_lines = parse_hover_result(result, ft)
+    local sig_lines, doc_lines = util.parse_hover_result(result, ft, format_docs)
     if sig_lines then
       cb(sig_lines, doc_lines)
       return
@@ -662,7 +686,7 @@ local function fetch_hover(bufnr, params, ft, cb)
     local col       = params.position.character
     local line_nr   = params.position.line
     local line_text = vim.api.nvim_buf_get_lines(bufnr, line_nr, line_nr + 1, false)[1] or ""
-    if is_keyword(ft, word_containing(line_text, col)) then
+    if is_keyword(ft, util.word_containing(line_text, col, "[%a_#][%w_]*")) then
       cb(nil, nil)
       return
     end
@@ -805,7 +829,7 @@ function M.enrich(bufnr, opts, done)
   local line_nr   = params.position.line
   local col       = params.position.character
   local line_text = vim.api.nvim_buf_get_lines(bufnr, line_nr, line_nr + 1, false)[1] or ""
-  local word      = word_containing(line_text, col)
+  local word      = util.word_containing(line_text, col, "[%a_#][%w_]*")
 
   -- Fast-path for keywords: skip all LSP work and let main.lua serve the
   -- built-in reference.  Must happen before any request fires.

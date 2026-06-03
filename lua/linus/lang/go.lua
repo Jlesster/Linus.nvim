@@ -86,52 +86,7 @@ local GO_KEYWORDS = {
   ["complex128"] = true,
 }
 
--- Return the identifier whose character span contains col (0-indexed).
--- Identical to word_containing() in java.lua.
-local function word_containing(line_text, col)
-  local pos = 1
-  while true do
-    local s, e = line_text:find("[%a_][%w_]*", pos)
-    if not s then break end
-    if col >= s - 1 and col <= e - 1 then
-      return line_text:sub(s, e)
-    end
-    if s - 1 > col then break end
-    pos = e + 1
-  end
-end
-
 -- ── Hover parsing ─────────────────────────────────────────────────────────────
-
--- gopls hover markdown: everything inside the first code fence is the
--- signature; everything after the closing fence is the godoc comment.
--- Identical structure to split_sig_docs() in java.lua.
----@param text string
----@return string sig_text, string docs_text
-local function split_sig_docs(text)
-  if not text or text == "" then return "", "" end
-
-  local sig_parts  = {}
-  local doc_parts  = {}
-  local in_fence   = false
-  local past_fence = false
-
-  for _, line in ipairs(vim.split(text, "\n", { plain = true })) do
-    if line:match("^```") then
-      in_fence = not in_fence
-      if not in_fence then past_fence = true end
-      table.insert(sig_parts, line)
-    elseif in_fence then
-      table.insert(sig_parts, line)
-    elseif past_fence then
-      table.insert(doc_parts, line)
-    else
-      table.insert(sig_parts, line)
-    end
-  end
-
-  return table.concat(sig_parts, "\n"), table.concat(doc_parts, "\n")
-end
 
 -- Turn raw godoc text into clean markdown lines.
 -- Mirrors the structure of format_docs() in java.lua.
@@ -261,65 +216,6 @@ local function format_docs(raw)
   return #out > 0 and out or nil
 end
 
--- ── LSP hover result parsing ───────────────────────────────────────────────────
-
--- Parse any gopls hover result shape into (sig_lines, doc_lines).
--- Mirrors parse_hover_result() in java.lua exactly, adapted for gopls:
---
---   MarkupContent  {kind="markdown", value="```go\nfunc...\n```\ngodoc"}
---   MarkedString   "func Foo(...)" (plain string — older gopls)
---   MarkedString[] [{language="go", value="func..."}, "godoc prose"]
----@param result table|nil
----@return string[]|nil sig_lines, string[]|nil doc_lines
-local function parse_hover_result(result)
-  if not result then return nil, nil end
-  local contents = result.contents
-  if not contents then return nil, nil end
-
-  -- MarkupContent {kind, value}
-  if type(contents) == "table" and contents.kind then
-    local raw = contents.value or ""
-    if raw == "" then return nil, nil end
-    local sig_text, docs_text = split_sig_docs(raw)
-    return sig_text ~= "" and util.to_lines(sig_text) or nil,
-        format_docs(docs_text)
-  end
-
-  -- MarkedString scalar
-  if type(contents) == "string" then
-    if contents == "" then return nil, nil end
-    local sig_text, docs_text = split_sig_docs(contents)
-    return sig_text ~= "" and util.to_lines(sig_text) or nil,
-        format_docs(docs_text)
-  end
-
-  -- MarkedString[] — wrap each code object in a language fence
-  if type(contents) == "table" then
-    local sig_lines = {}
-    local doc_parts = {}
-    for _, item in ipairs(contents) do
-      if type(item) == "table" and item.value and item.value ~= "" then
-        table.insert(sig_lines, "```" .. (item.language or "go"))
-        for _, l in ipairs(vim.split(item.value, "\n", { plain = true })) do
-          table.insert(sig_lines, l)
-        end
-        table.insert(sig_lines, "```")
-      elseif type(item) == "string" and item ~= "" then
-        table.insert(doc_parts, item)
-      end
-    end
-    while #sig_lines > 0 and sig_lines[#sig_lines]:match("^%s*$") do
-      table.remove(sig_lines)
-    end
-    local doc_lines = #doc_parts > 0
-        and format_docs(table.concat(doc_parts, "\n"))
-        or nil
-    return #sig_lines > 0 and sig_lines or nil, doc_lines
-  end
-
-  return nil, nil
-end
-
 -- ── fetch_hover + retry ────────────────────────────────────────────────────────
 
 -- When hover returns nothing for a non-keyword position, scan ahead on the
@@ -354,7 +250,7 @@ local function retry_at_symbol(bufnr, params, cb)
   local new_params = vim.deepcopy(params)
   new_params.position.character = new_col
   util.std_request(bufnr, "gopls", "textDocument/hover", new_params, function(result)
-    cb(parse_hover_result(result))
+    cb(util.parse_hover_result(result, "go", format_docs))
   end)
 end
 
@@ -378,7 +274,7 @@ local function fetch_hover(bufnr, params, cb)
     local col       = params.position.character
     local line_nr   = params.position.line
     local line_text = vim.api.nvim_buf_get_lines(bufnr, line_nr, line_nr + 1, false)[1] or ""
-    if GO_KEYWORDS[word_containing(line_text, col)] then
+    if GO_KEYWORDS[util.word_containing(line_text, col, "[%a_][%w_]*")] then
       cb(nil, nil)
       return
     end
@@ -404,7 +300,7 @@ local function loc_display(loc)
     local target_line = vim.api.nvim_buf_get_lines(buf, line, line + 1, false)[1]
     if target_line then
       local col   = range.start.character or 0
-      local ident = word_containing(target_line, col)
+      local ident = util.word_containing(target_line, col, "[%a_][%w_]*")
       if ident and ident ~= "" then
         return ident .. "  `" .. base .. "`"
       end

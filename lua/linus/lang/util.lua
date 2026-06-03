@@ -103,31 +103,52 @@ function M.extract_value(contents)
   return ""
 end
 
+-- Return the identifier whose character span contains col (0-indexed).
+---@param line_text string
+---@param col integer
+---@param pattern string
+---@return string|nil
+function M.word_containing(line_text, col, pattern)
+  pattern = pattern or "[%a_%][%w_]*"
+  local pos = 1
+  while true do
+    local s, e = line_text:find(pattern, pos)
+    if not s then return nil end
+    if col >= s - 1 and col <= e - 1 then
+      return line_text:sub(s, e)
+    end
+    if s - 1 > col then return nil end
+    pos = e + 1
+  end
+end
+
 -- Split hover markdown at the first closing code fence, returning
--- (signature_text, docs_text). Used by go.lua and c.lua.
+-- (signature_text, docs_text).
 ---@param text string
 ---@return string sig, string docs
-function M.split_fence(text)
+function M.split_sig_docs(text)
   if not text or text == "" then return "", "" end
-  local lines    = vim.split(text, "\n", { plain = true })
-  local sig      = {}
-  local docs     = {}
-  local in_fence = false
-  local done_sig = false
-  for _, line in ipairs(lines) do
-    if not done_sig then
-      if line:match("^```") then
-        in_fence = not in_fence
-        table.insert(sig, line)
-        if not in_fence then done_sig = true end
-      else
-        table.insert(sig, line)
-      end
+
+  local sig_parts  = {}
+  local doc_parts  = {}
+  local in_fence   = false
+  local past_fence = false
+
+  for _, line in ipairs(vim.split(text, "\n", { plain = true })) do
+    if line:match("^```") then
+      in_fence = not in_fence
+      if not in_fence then past_fence = true end
+      table.insert(sig_parts, line)
+    elseif in_fence then
+      table.insert(sig_parts, line)
+    elseif past_fence then
+      table.insert(doc_parts, line)
     else
-      table.insert(docs, line)
+      table.insert(sig_parts, line)
     end
   end
-  return table.concat(sig, "\n"), table.concat(docs, "\n")
+
+  return table.concat(sig_parts, "\n"), table.concat(doc_parts, "\n")
 end
 
 -- Split text into lines, stripping leading and trailing blank lines.
@@ -143,6 +164,59 @@ function M.to_lines(text)
     table.remove(lines)
   end
   return lines
+end
+
+-- Parse any LSP hover result shape into (sig_lines, doc_lines).
+-- This generic handler supports MarkupContent, MarkedString scalars, and MarkedString arrays.
+---@param result table|nil
+---@param ft string
+---@param format_docs_fn fun(string): string[]|nil
+---@return string[]|nil sig_lines, string[]|nil doc_lines
+function M.parse_hover_result(result, ft, format_docs_fn)
+  if not result then return nil, nil end
+  local contents = result.contents
+  if not contents then return nil, nil end
+
+  if type(contents) == "table" and contents.kind then
+    -- MarkupContent
+    local raw = contents.value or ""
+    if raw == "" then return nil, nil end
+    local sig_text, docs_text = M.split_sig_docs(raw)
+    return sig_text ~= "" and M.to_lines(sig_text) or nil, format_docs_fn(docs_text)
+  end
+
+  if type(contents) == "string" then
+    -- MarkedString scalar
+    if contents == "" then return nil, nil end
+    local sig_text, docs_text = M.split_sig_docs(contents)
+    return sig_text ~= "" and M.to_lines(sig_text) or nil, format_docs_fn(docs_text)
+  end
+
+  if type(contents) == "table" then
+    -- MarkedString[]
+    local sig_lines = {}
+    local doc_parts = {}
+    for _, item in ipairs(contents) do
+      if type(item) == "table" and item.value and item.value ~= "" then
+        table.insert(sig_lines, "```" .. (item.language or ft or "text"))
+        for _, l in ipairs(vim.split(item.value, "\n", { plain = true })) do
+          table.insert(sig_lines, l)
+        end
+        table.insert(sig_lines, "```")
+      elseif type(item) == "string" and item ~= "" then
+        table.insert(doc_parts, item)
+      end
+    end
+    while #sig_lines > 0 and sig_lines[#sig_lines]:match("^%s*$") do
+      table.remove(sig_lines)
+    end
+    local doc_lines = #doc_parts > 0
+        and format_docs_fn(table.concat(doc_parts, "\n"))
+        or nil
+    return #sig_lines > 0 and sig_lines or nil, doc_lines
+  end
+
+  return nil, nil
 end
 
 -- Create a countdown barrier: returns a tick() function that calls done()
