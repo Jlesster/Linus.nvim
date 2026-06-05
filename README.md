@@ -1,8 +1,8 @@
 # Linus.nvim
 
 Rich universal hover for Java, Go, C, and C++. Brings rust-analyzer-level hover
-help to jdtls, gopls, and clangd — type hierarchy, docs, implementations, and
-a bundled keyword reference as a fallback when LSP returns nothing.
+help to jdtls, gopls, and clangd — type hierarchy, docs, implementations, and a
+bundled keyword reference as a fallback when LSP returns nothing.
 
 ## Requirements
 
@@ -45,6 +45,16 @@ require("linus").setup({
 })
 ```
 
+Add linus as a hover.nvim provider
+
+```lua
+require('hover').setup({
+  providers = {
+    'linus.providers.main', -- first = wins
+  },
+})
+```
+
 ## Keyword overrides
 
 Point `keyword_overrides_path` at a Lua file that returns a table:
@@ -63,26 +73,26 @@ return {
 
 ## Keymaps
 
-| Key | Action |
-|-----|--------|
-| `K` | Hover (via hover.nvim) |
-| `gK` | Cycle to previous provider |
+| Key         | Action                           |
+| ----------- | -------------------------------- |
+| `K`         | Hover (via hover.nvim)           |
+| `gK`        | Cycle to previous provider       |
 | `<leader>K` | Pin / unpin the last hover float |
 
 Inside a pinned float:
 
-| Key | Action |
-|-----|--------|
-| `q` / `<Esc>` | Close |
-| `y` | Copy contents to system clipboard |
+| Key           | Action                            |
+| ------------- | --------------------------------- |
+| `q` / `<Esc>` | Close                             |
+| `y`           | Copy contents to system clipboard |
 
 ## What each language gets
 
-| Feature | Java | Go | C | C++ |
-|---------|------|----|---|-----|
-| Signature | ✓ jdtls extended | ✓ gopls | ✓ clangd | ✓ clangd |
-| Javadoc / godoc | ✓ | ✓ | ✓ (doxygen) | ✓ (doxygen) |
-| Type hierarchy | ✓ supertypes + subtypes | — | ✓ supertypes | ✓ supertypes |
-| Implementations | ✓ | ✓ | — | — |
-| Macro info | — | — | ✓ | ✓ |
-| Keyword fallback | ✓ | ✓ | ✓ | ✓ (+ C) |
+| Feature          | Java                    | Go      | C            | C++          |
+| ---------------- | ----------------------- | ------- | ------------ | ------------ |
+| Signature        | ✓ jdtls extended        | ✓ gopls | ✓ clangd     | ✓ clangd     |
+| Javadoc / godoc  | ✓                       | ✓       | ✓ (doxygen)  | ✓ (doxygen)  |
+| Type hierarchy   | ✓ supertypes + subtypes | —       | ✓ supertypes | ✓ supertypes |
+| Implementations  | ✓                       | ✓       | —            | —            |
+| Macro info       | —                       | —       | ✓            | ✓            |
+| Keyword fallback | ✓                       | ✓       | ✓            | ✓ (+ C)      |
