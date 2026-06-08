@@ -1,7 +1,20 @@
 -- linus/keywords/cpp.lua
 -- C++ keywords. Inherits all C entries; adds/overrides C++-specific ones.
 
-local c = require("linus.keywords.c")
+local c              = require("linus.keywords.c")
+local containers     = require("linus.keywords.cpp.containers")
+local algorithms     = require("linus.keywords.cpp.algorithms")
+local smart_pointers = require("linus.keywords.cpp.smart_pointers")
+local utilities      = require("linus.keywords.cpp.utilities")
+local io             = require("linus.keywords.cpp.io")
+local threading      = require("linus.keywords.cpp.threading")
+local chrono         = require("linus.keywords.cpp.chrono")
+local filesystem     = require("linus.keywords.cpp.filesystem")
+local type_traits    = require("linus.keywords.cpp.type_traits")
+local random         = require("linus.keywords.cpp.random")
+local regex          = require("linus.keywords.cpp.regex")
+local numeric        = require("linus.keywords.cpp.numeric")
+local ftxui          = require("linus.keywords.cpp.ftxui")
 
 local cpp = {
 
@@ -1396,5 +1409,18 @@ int n = add(2, 3);
 **See also** → `import` (C++20 modules), `namespace`]],
 }
 
--- Merge C entries underneath (C++ overrides take precedence for shared keywords)
-return vim.tbl_extend("keep", cpp, c)
+-- Merge all sub-modules and C underneath (cpp table takes highest precedence)
+local merged = vim.tbl_extend("keep", cpp, containers)
+merged = vim.tbl_extend("keep", merged, algorithms)
+merged = vim.tbl_extend("keep", merged, smart_pointers)
+merged = vim.tbl_extend("keep", merged, utilities)
+merged = vim.tbl_extend("keep", merged, io)
+merged = vim.tbl_extend("keep", merged, threading)
+merged = vim.tbl_extend("keep", merged, chrono)
+merged = vim.tbl_extend("keep", merged, filesystem)
+merged = vim.tbl_extend("keep", merged, type_traits)
+merged = vim.tbl_extend("keep", merged, random)
+merged = vim.tbl_extend("keep", merged, regex)
+merged = vim.tbl_extend("keep", merged, numeric)
+merged = vim.tbl_extend("keep", merged, ftxui)
+return vim.tbl_extend("keep", merged, c)
