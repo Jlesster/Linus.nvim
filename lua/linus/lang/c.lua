@@ -148,13 +148,386 @@ local function is_keyword(ft, word)
   return C_KEYWORDS[word]
 end
 
+-- ── Curated External Documentation ──────────────────────────────────────────────────
+
+local CURATED_CPP_DOCS = {
+  -- ── Containers ────────────────────────────────────────────────────────────────────
+  ['std::vector'] = {
+    '**Dynamic Array**',
+    'A sequence container representing an array that can change in size.',
+    '',
+    '- **Access**: `O(1)` random access via `operator[]` or `at()`.',
+    '- **Insertion/Deletion**: `O(1)` amortized at the end; `O(n)` elsewhere.',
+    '- **Storage**: Contiguous memory block.',
+    '',
+    'Common methods: `push_back()`, `pop_back()`, `insert()`, `erase()`, `clear()`.',
+  },
+  ['std::string'] = {
+    '**String (basic_string<char>)**',
+    'A sequence of characters, typically used to represent text.',
+    '',
+    '- **Storage**: Contiguous memory, usually with Small String Optimization (SSO).',
+    '- **Operations**: Concatenation (`+`), searching (`find`), slicing (`substr`).',
+    '',
+    'Common methods: `length()`, `size()`, `append()`, `push_back()`, `find()`.',
+  },
+  ['std::map'] = {
+    '**Associative Map**',
+    'A collection of key-value pairs, sorted by key.',
+    '',
+    '- **Implementation**: Typically a Red-Black Tree.',
+    '- **Complexity**: `O(log n)` for search, insertion, and removal.',
+    '- **Ordering**: Elements are always sorted by the key\'s `operator<`.',
+    '',
+    'Common methods: `insert()`, `operator[]`, `find()`, `erase()`.',
+  },
+  ['std::unordered_map'] = {
+    '**Hash Map**',
+    'An associative container of key-value pairs, organized by hash.',
+    '',
+    '- **Implementation**: Hash table with chaining.',
+    '- **Complexity**: `O(1)` average case; `O(n)` worst case.',
+    '- **Ordering**: No guaranteed order of elements.',
+    '',
+    'Common methods: `insert()`, `operator[]`, `find()`, `erase()`.',
+  },
+  ['std::set'] = {
+    '**Sorted Set**',
+    'A collection of unique keys, sorted by the keys.',
+    '',
+    '- **Implementation**: Red-Black Tree.',
+    '- **Complexity**: `O(log n)` operations.',
+    '',
+    'Common methods: `insert()`, `erase()`, `find()`, `count()`.',
+  },
+  ['std::unordered_set'] = {
+    '**Hash Set**',
+    'A collection of unique keys, organized by hash.',
+    '',
+    '- **Implementation**: Hash table.',
+    '- **Complexity**: `O(1)` average case.',
+    '',
+    'Common methods: `insert()`, `erase()`, `find()`, `count()`.',
+  },
+  ['std::deque'] = {
+    '**Double-Ended Queue**',
+    'A sequence container allowing fast insertions and deletions at both ends.',
+    '',
+    '- **Storage**: Non-contiguous chunks of memory.',
+    '- **Access**: `O(1)` random access.',
+    '',
+    'Common methods: `push_front()`, `pop_front()`, `push_back()`, `pop_back()`.',
+  },
+  ['std::list'] = {
+    '**Doubly Linked List**',
+    'A sequence container where each element is a separate node.',
+    '',
+    '- **Access**: `O(n)` linear access (no random access).',
+    '- **Insertion/Deletion**: `O(1)` if the position is known.',
+    '',
+    'Common methods: `push_front()`, `push_back()`, `sort()`, `merge()`, `splice()`.',
+  },
+  ['std::array'] = {
+    '**Fixed-Size Array**',
+    'A wrapper around a native C-style array that doesn\'t decay to a pointer.',
+    '',
+    '- **Storage**: Stack-allocated, contiguous memory.',
+    '- **Access**: `O(1)` random access.',
+    '',
+    'Common methods: `at()`, `operator[]`, `size()`, `fill()`.',
+  },
+  ['std::span'] = {
+    '**Contiguous View**',
+    'A non-owning view over a contiguous sequence of objects (array, vector, etc.).',
+    '',
+    '- **Usage**: Pass a slice of memory without copying or allocating.',
+    '- **Complexity**: `O(1)` access.',
+    '',
+    'Common methods: `data()`, `size()`, `subspan()`.',
+  },
+
+  -- ── Smart Pointers ─────────────────────────────────────────────────────────────
+  ['std::shared_ptr'] = {
+    '**Shared Smart Pointer**',
+    'A pointer that manages the lifetime of an object through reference counting.',
+    '',
+    '- **Ownership**: Shared; object is deleted when the last `shared_ptr` is destroyed.',
+    '- **Overhead**: Atomic reference count and control block.',
+    '',
+    'Common methods: `get()`, `use_count()`, `reset()`, `make_shared()`.',
+  },
+  ['std::unique_ptr'] = {
+    '**Unique Smart Pointer**',
+    'A pointer that has exclusive ownership of an object.',
+    '',
+    '- **Ownership**: Single owner; cannot be copied, only moved.',
+    '- **Overhead**: Zero (same size as raw pointer).',
+    '',
+    'Common methods: `get()`, `release()`, `reset()`, `make_unique()`.',
+  },
+  ['std::weak_ptr'] = {
+    '**Weak Smart Pointer**',
+    'A non-owning observer of an object managed by `shared_ptr`.',
+    '',
+    '- **Purpose**: Breaks cyclic references to avoid memory leaks.',
+    '- **Access**: Must be converted to `shared_ptr` via `lock()` to use the object.',
+    '',
+    'Common methods: `lock()`, `expired()`, `use_count()`.',
+  },
+
+  -- ── Utilities ──────────────────────────────────────────────────────────────────
+  ['std::pair'] = {
+    '**Pair Utility**',
+    'A simple structure that stores two values of potentially different types.',
+    '',
+    '- **Members**: `.first` and `.second`.',
+    '- **Usage**: Often used as a return value for functions that need to return two things.',
+  },
+  ['std::tuple'] = {
+    '**Tuple Utility**',
+    'A fixed-size collection of values of any type.',
+    '',
+    '- **Access**: Use `std::get<N>(tuple)` or structured bindings `auto [a, b, c] = ...`.',
+    '- **Usage**: Generalization of `std::pair`.',
+  },
+  ['std::optional'] = {
+    '**Optional Value**',
+    'A wrapper that may or may not contain a value.',
+    '',
+    '- **Purpose**: Represents "value or nothing" without using null pointers or magic constants.',
+    '- **Access**: `*opt`, `opt->`, or `opt.value()`. Use `has_value()` to check presence.',
+    '',
+    'Common methods: `value_or()`, `emplace()`.',
+  },
+  ['std::variant'] = {
+    '**Type-Safe Union**',
+    'A wrapper that can hold exactly one value from a set of predefined types.',
+    '',
+    '- **Safety**: Tracks which type it currently holds; throws `bad_variant_access` on wrong type.',
+    '- **Access**: `std::get<T>(variant)` or `std::visit()`.',
+  },
+  ['std::any'] = {
+    '**Type-Safe Container**',
+    'A wrapper that can hold a value of any type.',
+    '',
+    '- **Usage**: When the type is not known until runtime.',
+    '- **Access**: Must be explicitly cast back to the original type via `std::any_cast`.',
+  },
+
+  -- ── Algorithms ─────────────────────────────────────────────────────────────────
+  ['std::sort'] = {
+    '**Sort Algorithm**',
+    'Sorts a range `[first, last)` into ascending order.',
+    '',
+    '- **Complexity**: `O(n log n)` average and worst case.',
+    '- **Stability**: Not stable. Use `std::stable_sort` if order of equals must be preserved.',
+  },
+  ['std::find'] = {
+    '**Find Algorithm**',
+    'Searches for an element in the range `[first, last)`.',
+    '',
+    '- **Complexity**: `O(n)` linear search.',
+    '- **Return**: Iterator to the first element matching the value, or `last` if not found.',
+  },
+  ['std::lower_bound'] = {
+    '**Binary Search: Lower Bound**',
+    'Finds the first element in a sorted range `[first, last)` that is NOT less than the value.',
+    '',
+    '- **Complexity**: `O(log n)` comparisons.',
+    '- **Return**: Iterator to the first element `x` such that `x >= value`.',
+  },
+  ['std::upper_bound'] = {
+    '**Binary Search: Upper Bound**',
+    'Finds the first element in a sorted range `[first, last)` that is GREATER than the value.',
+    '',
+    '- **Complexity**: `O(log n)` comparisons.',
+    '- **Return**: Iterator to the first element `x` such that `x > value`.',
+  },
+
+  -- ── Threading & Atomic ────────────────────────────────────────────────────────
+  ['std::thread'] = {
+    '**Execution Thread**',
+    'A handle to a new thread of execution.',
+    '',
+    '- **Lifecycle**: Must be either `join()`-ed or `detach()`-ed before destruction.',
+    '- **C++20**: Use `std::jthread` for automatic joining.',
+  },
+  ['std::mutex'] = {
+    '**Mutual Exclusion**',
+    'A synchronization primitive used to protect shared data from concurrent access.',
+    '',
+    '- **Usage**: Always wrap in `std::lock_guard` or `std::unique_lock` to avoid deadlocks.',
+    '- **Methods**: `lock()`, `unlock()`, `try_lock()`.',
+  },
+  ['std::atomic'] = {
+    '**Atomic Type**',
+    'A template that provides atomic operations on a value.',
+    '',
+    '- **Purpose**: Thread-safe variable access without explicit mutexes.',
+    '- **Memory Order**: Supports complex memory ordering (`memory_order_relaxed`, etc.).',
+  },
+
+  -- ── Chrono ────────────────────────────────────────────────────────────────────
+  ['std::chrono::system_clock'] = {
+    '**System Clock**',
+    'A clock that represents the wall clock time of the system.',
+    '',
+    '- **Usage**: Converting to/from calendar time (e.g., `time_t`).',
+    '- **Precision**: Implementation-defined.',
+  },
+  ['std::chrono::steady_clock'] = {
+    '**Steady Clock**',
+    'A monotonic clock that never goes backward.',
+    '',
+    '- **Usage**: Measuring elapsed time, intervals, and timeouts.',
+    '- **Guarantee**: Ticks at a constant rate.',
+  },
+  ['std::chrono::duration'] = {
+    '**Time Duration**',
+    'Represents a span of time (e.g., 5 seconds, 10 milliseconds).',
+    '',
+    '- **Structure**: Consists of a representation (integer type) and a period.',
+    '- **Conversion**: Use `std::chrono::duration_cast`.',
+  },
+
+  -- ── I/O ────────────────────────────────────────────────────────────────────────
+  ['std::cout'] = {
+    '**Standard Output Stream**',
+    'The standard output stream object associated with `stdout`.',
+    '',
+    '- **Usage**: `std::cout << "Hello World" << std::endl;`',
+    '- **Type**: `std::ostream`.',
+  },
+  ['std::cin'] = {
+    '**Standard Input Stream**',
+    'The standard input stream object associated with `stdin`.',
+    '',
+    '- **Usage**: `std::cin >> variable;`',
+    '- **Type**: `std::istream`.',
+  },
+  ['std::forward_list'] = {
+    '**Singly Linked List**',
+    'A sequence container providing constant time insertion/deletion at the front.',
+    '',
+    '- **Storage**: Non-contiguous memory (singly linked nodes).',
+    '- **Access**: Linear access only; no random access.',
+    '',
+    'Common methods: `push_front()`, `pop_front()`, `merge()`, `remove()`.',
+  },
+  ['std::stack'] = {
+    '**LIFO Adapter**',
+    'A container adapter that provides Last-In-First-Out access.',
+    '',
+    '- **Implementation**: Default is `std::deque`.',
+    '- **Complexity**: `O(1)` for push/pop at the top.',
+    '',
+    'Common methods: `push()`, `pop()`, `top()`, `empty()`.',
+  },
+  ['std::queue'] = {
+    '**FIFO Adapter**',
+    'A container adapter that provides First-In-First-Out access.',
+    '',
+    '- **Implementation**: Default is `std::deque`.',
+    '- **Complexity**: `O(1)` for push at back and pop from front.',
+    '',
+    'Common methods: `push()`, `pop()`, `front()`, `back()`.',
+  },
+  ['std::priority_queue'] = {
+    '**Priority Queue**',
+    'A container adapter providing constant-time access to the largest element.',
+    '',
+    '- **Implementation**: Typically a max-heap using `std::vector`.',
+    '- **Complexity**: `O(log n)` for insertion and removal of top.',
+    '',
+    'Common methods: `push()`, `pop()`, `top()`, `emplace()`.',
+  },
+  ['std::jthread'] = {
+    '**Joining Thread (C++20)**',
+    'A thread that automatically joins upon destruction.',
+    '',
+    '- **Benefit**: Prevents program termination if `join()` is forgotten.',
+    '- **Cooperation**: Supports `std::stop_token` for clean interruption.',
+    '',
+    'Common methods: `request_stop()`, `get_stop_token()`.',
+  },
+  ['std::scoped_lock'] = {
+    '**Scoped Lock (C++17)**',
+    'A deadlock-avoidant RAII wrapper for multiple mutexes.',
+    '',
+    '- **Safety**: Uses a deadlock-avoidance algorithm to lock multiple mutexes atomically.',
+    '- **Usage**: Replaces `std::lock_guard` when multiple locks are needed.',
+    '',
+    'Usage: `std::scoped_lock lock(mutex1, mutex2);`',
+  },
+  ['std::condition_variable'] = {
+    '**Condition Variable**',
+    'A synchronization primitive that allows a thread to wait for a specific condition.',
+    '',
+    '- **Usage**: Always used with a `std::unique_lock` and a boolean predicate.',
+    '- **Signaling**: `notify_one()` or `notify_all()` wakes waiting threads.',
+    '',
+    'Common methods: `wait()`, `wait_for()`, `notify_one()`, `notify_all()`.',
+  },
+  ['std::latch'] = {
+    '**Latch (C++20)**',
+    'A single-use synchronization point that blocks threads until a count reaches zero.',
+    '',
+    '- **Purpose**: Coordinates the start of a parallel operation.',
+    '- **Behavior**: Once count is 0, all waiting threads are released and the latch cannot be reset.',
+    '',
+    'Common methods: `count_down()`, `wait()`, `arrive_and_wait()`.',
+  },
+  ['std::barrier'] = {
+    '**Barrier (C++20)**',
+    'A reusable synchronization point that blocks threads until a set number arrive.',
+    '',
+    '- **Phases**: Upon completion of a phase, it can execute a user-defined completion function.',
+    '- **Behavior**: Reset automatically for the next phase.',
+    '',
+    'Common methods: `arrive_and_wait()`, `arrive_and_drop()`.',
+  },
+  ['std::semaphore'] = {
+    '**Semaphore (C++20)**',
+    'A counting synchronization primitive to control access to a limited set of resources.',
+    '',
+    '- **Types**: `std::counting_semaphore` and `std::binary_semaphore`.',
+    '- **Operations**: `acquire()` (decrement/wait) and `release()` (increment/signal).',
+    '',
+    'Usage: `sem.acquire()`, `sem.release()`.',
+  },
+  ['std::expected'] = {
+    '**Expected Value (C++23)**',
+    'A vocabulary type that contains either a value of type `T` or an error of type `E`.',
+    '',
+    '- **Purpose**: Modern replacement for error codes or exceptions for expected failures.',
+    '- **Monadic Ops**: Supports `.and_then()`, `.transform()`, and `.or_else()`.',
+    '',
+    'Usage: `std::expected<int, std::error_code> res = do_work();`',
+  },
+  ['std::out_ptr'] = {
+    '**Output Pointer (C++23)**',
+    'A smart pointer adapter for interacting with C-style output parameters.',
+    '',
+    '- **Purpose**: Allows `std::unique_ptr` or `std::shared_ptr` to be used where a `T**` is expected.',
+    '- **Behavior**: Automatically updates the owning smart pointer after the C call returns.',
+    '',
+    'Usage: `c_api_func(std::out_ptr(my_ptr));`',
+  },
+  ['std::filesystem::path'] = {
+    '**Filesystem Path**',
+    'A class representing an OS-agnostic pathname.',
+    '',
+    '- **Operations**: Path concatenation using `/` operator, extension extraction via `.extension()`.',
+    '- **C++17**: Found in `<filesystem>` namespace.',
+    '',
+    'Common methods: `parent_path()`, `filename()`, `stem()`, `generic_string()`.',
+  },
+}
+
 -- ── External Documentation Pipeline ───────────────────────────────────────────────
 
 -- Maps symbols to cppreference.com pages.
--- C symbols use the function name directly; C++ symbols use the name after `std::`.
 local CPP_PAGE_MAPPING = {
-
-  -- ── C Standard Library ──────────────────────────────────────────────────────
   -- <stdio.h>
   ['printf']    = 'c/io/fprintf',
   ['fprintf']   = 'c/io/fprintf',
@@ -353,33 +726,39 @@ local CPP_PAGE_MAPPING = {
   ['va_end']     = 'c/variadic/va_end',
   ['va_copy']    = 'c/variadic/va_copy',
 
-  -- ── C++ Containers ──────────────────────────────────────────────────────────
-  vector             = 'cpp/container/vector',
-  deque              = 'cpp/container/deque',
-  list               = 'cpp/container/list',
+  -- ── C++ Namespaces ──────────────────────────────────────────────────────────
+  ['std']           = 'cpp/std',
+  ['vector']        = 'cpp/container/vector',
+  ['chrono']         = 'cpp/chrono',
+  ['filesystem']    = 'cpp/filesystem',
+  ['ranges']        = 'cpp/ranges',
+  ['atomic']        = 'cpp/atomic',
+  ['execution']     = 'cpp/execution',
+  ['expected']      = 'cpp/utility/expected',
+  ['optional']      = 'cpp/utility/optional',
+  ['variant']       = 'cpp/utility/variant',
+  ['any']           = 'cpp/utility/any',
+  ['span']          = 'cpp/container/span',
+  ['bitset']        = 'cpp/utility/bitset',
+  ['pair']          = 'cpp/utility/pair',
+  ['tuple']         = 'cpp/utility/tuple',
+  ['deque']         = 'cpp/container/deque',
+  ['list']          = 'cpp/container/list',
   ['forward_list']   = 'cpp/container/forward_list',
-  array              = 'cpp/container/array',
-  string             = 'cpp/string/basic_string',
-  ['string_view']    = 'cpp/string/basic_string_view',
-  map                = 'cpp/container/map',
-  multimap           = 'cpp/container/multimap',
-  set                = 'cpp/container/set',
-  multiset           = 'cpp/container/multiset',
-  ['unordered_map']   = 'cpp/container/unordered_map',
+  ['array']         = 'cpp/container/array',
+  ['string']        = 'cpp/string/basic_string',
+  ['string_view']   = 'cpp/string/basic_string_view',
+  ['map']           = 'cpp/container/map',
+  ['multimap']      = 'cpp/container/multimap',
+  ['set']           = 'cpp/container/set',
+  ['multiset']      = 'cpp/container/multiset',
+  ['unordered_map'] = 'cpp/container/unordered_map',
   ['unordered_multimap'] = 'cpp/container/unordered_multimap',
-  ['unordered_set']   = 'cpp/container/unordered_set',
+  ['unordered_set'] = 'cpp/container/unordered_set',
   ['unordered_multiset'] = 'cpp/container/unordered_multiset',
-  stack              = 'cpp/container/stack',
-  queue              = 'cpp/container/queue',
+  ['stack']         = 'cpp/container/stack',
+  ['queue']         = 'cpp/container/queue',
   ['priority_queue'] = 'cpp/container/priority_queue',
-  span               = 'cpp/container/span',
-  bitset             = 'cpp/utility/bitset',
-  optional           = 'cpp/utility/optional',
-  variant            = 'cpp/utility/variant',
-  any                = 'cpp/utility/any',
-  expected           = 'cpp/utility/expected',
-  pair               = 'cpp/utility/pair',
-  tuple              = 'cpp/utility/tuple',
 
   -- ── C++ Smart Pointers ─────────────────────────────────────────────────────
   ['shared_ptr']  = 'cpp/memory/shared_ptr',
@@ -391,7 +770,7 @@ local CPP_PAGE_MAPPING = {
   ['enable_shared_from_this'] = 'cpp/memory/enable_shared_from_this',
 
   -- ── C++ Algorithms ─────────────────────────────────────────────────────────
-  sort              = 'cpp/algorithm/sort',
+  ['sort']          = 'cpp/algorithm/sort',
   ['stable_sort']   = 'cpp/algorithm/stable_sort',
   ['partial_sort']  = 'cpp/algorithm/partial_sort',
   ['nth_element']   = 'cpp/algorithm/nth_element',
@@ -399,76 +778,76 @@ local CPP_PAGE_MAPPING = {
   ['upper_bound']   = 'cpp/algorithm/upper_bound',
   ['binary_search'] = 'cpp/algorithm/binary_search',
   ['equal_range']   = 'cpp/algorithm/equal_range',
-  find              = 'cpp/algorithm/find',
+  ['find']          = 'cpp/algorithm/find',
   ['find_if']       = 'cpp/algorithm/find',
   ['find_if_not']   = 'cpp/algorithm/find',
   ['find_end']      = 'cpp/algorithm/find_end',
   ['find_first_of'] = 'cpp/algorithm/find_first_of',
   ['adjacent_find'] = 'cpp/algorithm/adjacent_find',
-  count             = 'cpp/algorithm/count',
+  ['count']         = 'cpp/algorithm/count',
   ['count_if']      = 'cpp/algorithm/count',
-  for_each          = 'cpp/algorithm/for_each',
-  transform         = 'cpp/algorithm/transform',
-  copy              = 'cpp/algorithm/copy',
+  ['for_each']       = 'cpp/algorithm/for_each',
+  ['transform']      = 'cpp/algorithm/transform',
+  ['copy']           = 'cpp/algorithm/copy',
   ['copy_n']        = 'cpp/algorithm/copy_n',
   ['copy_if']       = 'cpp/algorithm/copy_if',
   ['copy_backward'] = 'cpp/algorithm/copy_backward',
-  move              = 'cpp/algorithm/move',
+  ['move']          = 'cpp/algorithm/move',
   ['move_backward'] = 'cpp/algorithm/move_backward',
-  fill              = 'cpp/algorithm/fill',
+  ['fill']          = 'cpp/algorithm/fill',
   ['fill_n']        = 'cpp/algorithm/fill_n',
-  generate          = 'cpp/algorithm/generate',
+  ['generate']      = 'cpp/algorithm/generate',
   ['generate_n']    = 'cpp/algorithm/generate_n',
-  replace           = 'cpp/algorithm/replace',
+  ['replace']       = 'cpp/algorithm/replace',
   ['replace_if']    = 'cpp/algorithm/replace',
   ['replace_copy']  = 'cpp/algorithm/replace_copy',
   ['replace_copy_if'] = 'cpp/algorithm/replace_copy',
-  remove            = 'cpp/algorithm/remove',
+  ['remove']         = 'cpp/algorithm/remove',
   ['remove_if']     = 'cpp/algorithm/remove',
-  ['remove_copy']   = 'cpp/algorithm/remove_copy',
+  ['remove_copy']    = 'cpp/algorithm/remove_copy',
   ['remove_copy_if'] = 'cpp/algorithm/remove_copy',
-  unique            = 'cpp/algorithm/unique',
+  ['unique']        = 'cpp/algorithm/unique',
   ['unique_copy']   = 'cpp/algorithm/unique_copy',
-  reverse           = 'cpp/algorithm/reverse',
+  ['reverse']       = 'cpp/algorithm/reverse',
   ['reverse_copy']  = 'cpp/algorithm/reverse_copy',
-  rotate            = 'cpp/algorithm/rotate',
+  ['rotate']        = 'cpp/algorithm/rotate',
   ['rotate_copy']   = 'cpp/algorithm/rotate_copy',
-  shuffle           = 'cpp/algorithm/random_shuffle',
-  sample            = 'cpp/algorithm/sample',
-  swap              = 'cpp/algorithm/swap',
+  ['shuffle']       = 'cpp/algorithm/random_shuffle',
+  ['sample']        = 'cpp/algorithm/sample',
+  ['swap']          = 'cpp/algorithm/swap',
   ['iter_swap']     = 'cpp/algorithm/iter_swap',
   ['swap_ranges']   = 'cpp/algorithm/swap_ranges',
-  accumulate        = 'cpp/algorithm/accumulate',
+  ['accumulate']    = 'cpp/algorithm/accumulate',
   ['inner_product'] = 'cpp/algorithm/inner_product',
   ['partial_sum']   = 'cpp/algorithm/partial_sum',
   ['adjacent_difference'] = 'cpp/algorithm/adjacent_difference',
-  iota              = 'cpp/algorithm/iota',
-  min               = 'cpp/algorithm/min',
-  max               = 'cpp/algorithm/max',
-  minmax            = 'cpp/algorithm/minmax',
+  ['iota']          = 'cpp/algorithm/iota',
+  ['min']           = 'cpp/algorithm/min',
+  ['max']           = 'cpp/algorithm/max',
+  ['minmax']        = 'cpp/algorithm/minmax',
   ['min_element']   = 'cpp/algorithm/min_element',
   ['max_element']   = 'cpp/algorithm/max_element',
   ['minmax_element'] = 'cpp/algorithm/minmax_element',
-  clamp             = 'cpp/algorithm/clamp',
-  equal             = 'cpp/algorithm/equal',
-  mismatch          = 'cpp/algorithm/mismatch',
+  ['clamp']         = 'cpp/algorithm/clamp',
+  ['equal']         = 'cpp/algorithm/equal',
+  ['mismatch']      = 'cpp/algorithm/mismatch',
   ['lexicographical_compare'] = 'cpp/algorithm/lexicographical_compare',
   ['all_of']        = 'cpp/algorithm/all_any_none_of',
   ['any_of']        = 'cpp/algorithm/all_any_none_of',
   ['none_of']       = 'cpp/algorithm/all_any_none_of',
-  is_sorted         = 'cpp/algorithm/is_sorted',
+  ['is_sorted']     = 'cpp/algorithm/is_sorted',
   ['is_sorted_until'] = 'cpp/algorithm/is_sorted_until',
   ['is_heap']       = 'cpp/algorithm/is_heap',
   ['is_heap_until'] = 'cpp/algorithm/is_heap_until',
-  partition         = 'cpp/algorithm/partition',
+  ['partition']     = 'cpp/algorithm/partition',
   ['stable_partition'] = 'cpp/algorithm/stable_partition',
   ['partition_point'] = 'cpp/algorithm/partition_point',
   ['partition_copy'] = 'cpp/algorithm/partition_copy',
-  merge             = 'cpp/algorithm/merge',
+  ['merge']         = 'cpp/algorithm/merge',
   ['inplace_merge'] = 'cpp/algorithm/inplace_merge',
-  includes          = 'cpp/algorithm/includes',
-  ['set_difference']    = 'cpp/algorithm/set_difference',
-  ['set_intersection']  = 'cpp/algorithm/set_intersection',
+  ['includes']      = 'cpp/algorithm/includes',
+  ['set_difference'] = 'cpp/algorithm/set_difference',
+  ['set_intersection'] = 'cpp/algorithm/set_intersection',
   ['set_symmetric_difference'] = 'cpp/algorithm/set_symmetric_difference',
   ['set_union']     = 'cpp/algorithm/set_union',
   ['is_permutation'] = 'cpp/algorithm/is_permutation',
@@ -477,94 +856,94 @@ local CPP_PAGE_MAPPING = {
 
   -- ── C++ Utilities ──────────────────────────────────────────────────────────
   ['function']  = 'cpp/utility/functional',
-  bind          = 'cpp/utility/functional/bind',
-  ref           = 'cpp/utility/functional/ref',
-  cref          = 'cpp/utility/functional/ref',
+  ['bind']      = 'cpp/utility/functional/bind',
+  ['ref']       = 'cpp/utility/functional/ref',
+  ['cref']      = 'cpp/utility/functional/ref',
   ['mem_fn']    = 'cpp/utility/functional/mem_fn',
-  hash          = 'cpp/utility/hash',
+  ['hash']      = 'cpp/utility/hash',
   ['from_chars'] = 'cpp/utility/from_chars',
-  ['to_chars']  = 'cpp/utility/to_chars',
+  ['to_chars']   = 'cpp/utility/to_chars',
 
   -- ── C++ I/O and manipulators ───────────────────────────────────────────────
-  iostream      = 'cpp/header/iostream',
-  fstream       = 'cpp/header/fstream',
-  sstream       = 'cpp/header/sstream',
-  iomanip       = 'cpp/header/iomanip',
-  iosfwd        = 'cpp/header/iosfwd',
-  streambuf     = 'cpp/header/streambuf',
-  cout          = 'cpp/io/cout',
-  cin           = 'cpp/io/cin',
-  cerr          = 'cpp/io/cerr',
-  clog          = 'cpp/io/clog',
-  ['setw']      = 'cpp/io/manip/setw',
+  ['iostream']  = 'cpp/header/iostream',
+  ['fstream']    = 'cpp/header/fstream',
+  ['sstream']    = 'cpp/header/sstream',
+  ['iomanip']    = 'cpp/header/iomanip',
+  ['iosfwd']     = 'cpp/header/iosfwd',
+  ['streambuf']   = 'cpp/header/streambuf',
+  ['cout']       = 'cpp/io/cout',
+  ['cin']        = 'cpp/io/cin',
+  ['cerr']       = 'cpp/io/cerr',
+  ['clog']       = 'cpp/io/clog',
+  ['setw']       = 'cpp/io/manip/setw',
   ['setprecision'] = 'cpp/io/manip/setprecision',
-  ['setfill']   = 'cpp/io/manip/setfill',
-  ['setbase']   = 'cpp/io/manip/setbase',
-  boolalpha     = 'cpp/io/manip/boolalpha',
-  showbase      = 'cpp/io/manip/showbase',
-  showpoint     = 'cpp/io/manip/showpoint',
-  uppercase     = 'cpp/io/manip/uppercase',
-  hex           = 'cpp/io/manip/hex',
-  dec           = 'cpp/io/manip/hex',
-  oct           = 'cpp/io/manip/hex',
-  ws            = 'cpp/io/manip/ws',
-  ends          = 'cpp/io/manip/ends',
-  flush         = 'cpp/io/manip/flush',
-  endl          = 'cpp/io/manip/endl',
-  skipws        = 'cpp/io/manip/skipws',
-  unitbuf       = 'cpp/io/manip/unitbuf',
+  ['setfill']    = 'cpp/io/manip/setfill',
+  ['setbase']    = 'cpp/io/manip/setbase',
+  ['boolalpha']  = 'cpp/io/manip/boolalpha',
+  ['showbase']   = 'cpp/io/manip/showbase',
+  ['showpoint']  = 'cpp/io/manip/showpoint',
+  ['uppercase']  = 'cpp/io/manip/uppercase',
+  ['hex']        = 'cpp/io/manip',
+  ['dec']        = 'cpp/io/manip',
+  ['oct']        = 'cpp/io/manip',
+  ['ws']         = 'cpp/io/manip/ws',
+  ['ends']       = 'cpp/io/manip/ends',
+  ['flush']      = 'cpp/io/manip/flush',
+  ['endl']       = 'cpp/io/manip/endl',
+  ['skipws']     = 'cpp/io/manip/skipws',
+  ['unitbuf']    = 'cpp/io/manip/unitbuf',
 
   -- ── C++ Threading ──────────────────────────────────────────────────────────
-  thread                = 'cpp/thread/thread',
-  jthread               = 'cpp/thread/jthread',
-  mutex                 = 'cpp/thread/mutex',
-  ['shared_mutex']      = 'cpp/thread/shared_mutex',
-  ['timed_mutex']       = 'cpp/thread/timed_mutex',
-  ['recursive_mutex']   = 'cpp/thread/recursive_mutex',
+  ['thread']      = 'cpp/thread/thread',
+  ['jthread']     = 'cpp/thread/jthread',
+  ['mutex']       = 'cpp/thread/mutex',
+  ['shared_mutex'] = 'cpp/thread/shared_mutex',
+  ['timed_mutex']  = 'cpp/thread/timed_mutex',
+  ['recursive_mutex'] = 'cpp/thread/recursive_mutex',
   ['shared_timed_mutex'] = 'cpp/thread/shared_timed_mutex',
-  ['lock_guard']        = 'cpp/thread/lock_guard',
-  ['unique_lock']       = 'cpp/thread/unique_lock',
-  ['shared_lock']       = 'cpp/thread/shared_lock',
-  ['scoped_lock']       = 'cpp/thread/scoped_lock',
+  ['lock_guard']  = 'cpp/thread/lock_guard',
+  ['unique_lock'] = 'cpp/thread/unique_lock',
+  ['shared_lock'] = 'cpp/thread/shared_lock',
+  ['scoped_lock'] = 'cpp/thread/scoped_lock',
   ['condition_variable'] = 'cpp/thread/condition_variable',
   ['condition_variable_any'] = 'cpp/thread/condition_variable',
-  future                = 'cpp/thread/future',
-  promise               = 'cpp/thread/promise',
-  async                 = 'cpp/thread/async',
-  atomic                = 'cpp/atomic/atomic',
-  ['atomic_flag']       = 'cpp/atomic/atomic_flag',
-  ['call_once']         = 'cpp/thread/call_once',
-  ['once_flag']         = 'cpp/thread/once_flag',
-  ['packaged_task']     = 'cpp/thread/packaged_task',
-  latch                 = 'cpp/thread/latch',
-  barrier               = 'cpp/thread/barrier',
+  ['future']     = 'cpp/thread/future',
+  ['promise']     = 'cpp/thread/promise',
+  ['async']       = 'cpp/thread/async',
+  ['atomic']      = 'cpp/atomic/atomic',
+  ['atomic_flag'] = 'cpp/atomic/atomic_flag',
+  ['call_once']   = 'cpp/thread/call_once',
+  ['once_flag']   = 'cpp/thread/once_flag',
+  ['packaged_task'] = 'cpp/thread/packaged_task',
+  ['latch']       = 'cpp/thread/latch',
+  ['barrier']     = 'cpp/thread/barrier',
   ['counting_semaphore'] = 'cpp/thread/counting_semaphore',
   ['binary_semaphore']  = 'cpp/thread/counting_semaphore',
 
   -- ── C++ Chrono ─────────────────────────────────────────────────────────────
-  chrono                = 'cpp/chrono',
-  ['system_clock']      = 'cpp/chrono/system_clock',
-  ['steady_clock']      = 'cpp/chrono/steady_clock',
+  ['chrono']      = 'cpp/chrono',
+  ['system_clock'] = 'cpp/chrono/system_clock',
+  ['steady_clock'] = 'cpp/chrono/steady_clock',
   ['high_resolution_clock'] = 'cpp/chrono/high_resolution_clock',
-  duration              = 'cpp/chrono/duration',
-  ['time_point']        = 'cpp/chrono/time_point',
-  hours                 = 'cpp/chrono/duration',
-  minutes               = 'cpp/chrono/duration',
-  seconds               = 'cpp/chrono/duration',
-  milliseconds          = 'cpp/chrono/duration',
-  microseconds          = 'cpp/chrono/duration',
-  nanoseconds           = 'cpp/chrono/duration',
-  ['duration_cast']     = 'cpp/chrono/duration_cast',
-  ['time_point_cast']   = 'cpp/chrono/time_point_cast',
+  ['duration']    = 'cpp/chrono/duration',
+  ['time_point']  = 'cpp/chrono/time_point',
+  ['hours']       = 'cpp/chrono/duration',
+  ['minutes']     = 'cpp/chrono/duration',
+  ['seconds']     = 'cpp/chrono/duration',
+  ['milliseconds'] = 'cpp/chrono/duration',
+  ['microseconds'] = 'cpp/chrono/duration',
+  ['nanoseconds'] = 'cpp/chrono/duration',
+  ['duration_cast'] = 'cpp/chrono/duration_cast',
+  ['time_point_cast'] = 'cpp/chrono/time_point_cast',
 
   -- ── C++ Filesystem ─────────────────────────────────────────────────────────
-  path                  = 'cpp/filesystem/path',
-  ['directory_entry']   = 'cpp/filesystem/directory_entry',
-  ['directory_iterator'] = 'cpp/filesystem/directory_iterator',
+  ['path']                  = 'cpp/filesystem/path',
+  ['directory_entry']       = 'cpp/filesystem/directory_entry',
+  ['directory_iterator']    = 'cpp/filesystem/directory_iterator',
   ['recursive_directory_iterator'] = 'cpp/filesystem/recursive_directory_iterator',
-  ['file_status']       = 'cpp/filesystem/file_status',
-  ['space_info']        = 'cpp/filesystem/space',
-  ['filesystem_error']  = 'cpp/filesystem/filesystem_error',
+  ['file_status']           = 'cpp/filesystem/file_status',
+  ['space_info']            = 'cpp/filesystem/space',
+  ['filesystem_error']     = 'cpp/filesystem/filesystem_error',
 
   -- ── C++ Numeric / Random ───────────────────────────────────────────────────
   ['mt19937']             = 'cpp/numeric/random/mersenne_twister_engine',
@@ -572,15 +951,15 @@ local CPP_PAGE_MAPPING = {
   ['random_device']       = 'cpp/numeric/random/random_device',
   ['uniform_int_distribution'] = 'cpp/numeric/random/uniform_int_distribution',
   ['normal_distribution'] = 'cpp/numeric/random/normal_distribution',
-  complex                 = 'cpp/numeric/complex',
+  ['complex']             = 'cpp/numeric/complex',
   ['numeric_limits']      = 'cpp/types/numeric_limits',
-  ratio                   = 'cpp/numeric/ratio/ratio',
+  ['ratio']               = 'cpp/numeric/ratio/ratio',
   ['popcount']            = 'cpp/numeric/popcount',
   ['bit_cast']            = 'cpp/numeric/bit_cast',
-  gcd                     = 'cpp/numeric/gcd',
-  lcm                     = 'cpp/numeric/lcm',
-  midpoint                = 'cpp/numeric/midpoint',
-  lerp                    = 'cpp/numeric/lerp',
+  ['gcd']                 = 'cpp/numeric/gcd',
+  ['lcm']                 = 'cpp/numeric/lcm',
+  ['midpoint']            = 'cpp/numeric/midpoint',
+  ['lerp']                = 'cpp/numeric/lerp',
 
   -- ── C++ Ranges (C++20) ─────────────────────────────────────────────────────
   ['views::filter']    = 'cpp/ranges/filter_view',
@@ -599,14 +978,14 @@ local CPP_PAGE_MAPPING = {
   ['ranges::transform'] = 'cpp/algorithm/ranges/transform',
 
   -- ── C++ Regex ──────────────────────────────────────────────────────────────
-  regex                 = 'cpp/regex/basic_regex',
-  ['smatch']            = 'cpp/regex/match_results',
-  ['cmatch']            = 'cpp/regex/match_results',
-  ['regex_match']       = 'cpp/regex/regex_match',
-  ['regex_search']      = 'cpp/regex/regex_search',
-  ['regex_replace']     = 'cpp/regex/regex_replace',
-  ['regex_iterator']    = 'cpp/regex/regex_iterator',
-  ['regex_token_iterator'] = 'cpp/regex/regex_token_iterator',
+  ['regex']                 = 'cpp/regex/basic_regex',
+  ['smatch']                = 'cpp/regex/match_results',
+  ['cmatch']                = 'cpp/regex/match_results',
+  ['regex_match']           = 'cpp/regex/regex_match',
+  ['regex_search']          = 'cpp/regex/regex_search',
+  ['regex_replace']         = 'cpp/regex/regex_replace',
+  ['regex_iterator']        = 'cpp/regex/regex_iterator',
+  ['regex_token_iterator']  = 'cpp/regex/regex_token_iterator',
 
   -- ── C++ Type Traits ───────────────────────────────────────────────────────
   ['is_same']             = 'cpp/types/is_same',
@@ -652,191 +1031,96 @@ local CPP_PAGE_MAPPING = {
   ['negation']            = 'cpp/types/negation',
 }
 
+-- ── C++ Category-based mappings ──────────────────────────────────────────────────
+local CPP_CATEGORIES = {
+  container = { 'vector', 'deque', 'list', 'forward_list', 'array', 'span', 'map', 'set', 'unordered_map', 'unordered_set', 'multimap', 'multiset', 'unordered_multimap', 'unordered_multiset', 'stack', 'queue', 'priority_queue' },
+  algorithm = { 'sort', 'stable_sort', 'partial_sort', 'nth_element', 'lower_bound', 'upper_bound', 'binary_search', 'equal_range', 'find', 'find_if', 'find_if_not', 'find_end', 'find_first_of', 'adjacent_find', 'count', 'count_if', 'for_each', 'transform', 'copy', 'copy_n', 'copy_if', 'copy_backward', 'move', 'move_backward', 'fill', 'fill_n', 'generate', 'generate_n', 'replace', 'replace_if', 'replace_copy', 'replace_copy_if', 'remove', 'remove_if', 'remove_copy', 'remove_copy_if', 'unique', 'unique_copy', 'reverse', 'reverse_copy', 'rotate', 'rotate_copy', 'shuffle', 'sample', 'swap', 'iter_swap', 'swap_ranges', 'accumulate', 'inner_product', 'partial_sum', 'adjacent_difference', 'iota', 'min', 'max', 'minmax', 'min_element', 'max_element', 'minmax_element', 'clamp', 'equal', 'mismatch', 'lexicographical_compare', 'all_of', 'any_of', 'none_of', 'is_sorted', 'is_sorted_until', 'is_heap', 'is_heap_until', 'partition', 'stable_partition', 'partition_point', 'partition_copy', 'merge', 'inplace_merge', 'includes', 'set_difference', 'set_intersection', 'set_symmetric_difference', 'set_union', 'is_permutation', 'next_permutation', 'prev_permutation' },
+  numeric = { 'gcd', 'lcm', 'midpoint', 'lerp', 'popcount', 'bit_cast', 'reduce', 'inner_product', 'partial_sum', 'adjacent_difference' },
+  utility = { 'pair', 'tuple', 'any', 'optional', 'variant', 'expected', 'move', 'forward', 'hash', 'from_chars', 'to_chars', 'exchange', 'swap', 'rel_ops' },
+  memory = { 'shared_ptr', 'unique_ptr', 'weak_ptr', 'make_shared', 'make_unique', 'allocate_shared', 'enable_shared_from_this', 'allocator', 'destroy_at' },
+  string = { 'string', 'string_view', 'basic_string', 'basic_string_view' },
+  io = { 'cout', 'cin', 'cerr', 'clog', 'ios', 'ios_base', 'istream', 'ostream', 'iostream', 'fstream', 'sstream', 'setw', 'setprecision', 'setfill', 'setbase', 'boolalpha', 'showbase', 'showpoint', 'uppercase', 'hex', 'dec', 'oct', 'ws', 'ends', 'flush', 'endl', 'skipws', 'unitbuf' },
+  thread = { 'thread', 'jthread', 'mutex', 'shared_mutex', 'timed_mutex', 'recursive_mutex', 'shared_timed_mutex', 'lock_guard', 'unique_lock', 'shared_lock', 'scoped_lock', 'condition_variable', 'condition_variable_any', 'future', 'promise', 'async', 'packaged_task', 'latch', 'barrier', 'counting_semaphore', 'binary_semaphore', 'call_once', 'once_flag' },
+  atomic = { 'atomic', 'atomic_flag' },
+  chrono = { 'system_clock', 'steady_clock', 'high_resolution_clock', 'duration', 'time_point', 'hours', 'minutes', 'seconds', 'milliseconds', 'microseconds', 'nanoseconds', 'duration_cast', 'time_point_cast' },
+  filesystem = { 'path', 'directory_entry', 'directory_iterator', 'recursive_directory_iterator', 'file_status', 'space_info', 'filesystem_error' },
+  regex = { 'regex', 'smatch', 'cmatch', 'regex_match', 'regex_search', 'regex_replace', 'regex_iterator', 'regex_token_iterator' },
+  types = { 'is_same', 'is_integral', 'is_floating_point', 'is_arithmetic', 'is_pointer', 'is_reference', 'is_const', 'is_volatile', 'is_base_of', 'is_convertible', 'is_trivially_copyable', 'is_standard_layout', 'is_polymorphic', 'is_abstract', 'is_class', 'is_enum', 'is_union', 'is_function', 'is_empty', 'is_final', 'is_aggregate', 'is_signed', 'is_unsigned', 'enable_if', 'conditional', 'remove_reference', 'remove_const', 'remove_volatile', 'remove_pointer', 'add_pointer', 'make_signed', 'make_unsigned', 'decay', 'common_type', 'underlying_type', 'void_t', 'invoke_result', 'integral_constant', 'conjunction', 'disjunction', 'negation' },
+}
+
 ---@param symbol string
 ---@return string|nil
 local function resolve_cpp_url(symbol)
-  local prefix = 'std::'
-  local name = symbol
-  if symbol:sub(1, #prefix) == prefix then
-    name = symbol:sub(#prefix + 1)
+  if not symbol or symbol == '' then return nil end
+
+  -- Clean symbol: remove trailing colons or whitespace
+  symbol = symbol:gsub('%s*$', ''):gsub(':$', '')
+
+  if require('linus').config.debug then
+    vim.notify('[linus] resolve_cpp_url: ' .. symbol, vim.log.levels.INFO)
   end
 
+  local prefix = 'std::'
+  local is_std = symbol:sub(1, #prefix) == prefix
+  local name = is_std and symbol:sub(#prefix + 1) or symbol
+
+  -- 1. Exact mapping (highest priority)
   local page = CPP_PAGE_MAPPING[name]
   if page then
     return page
   end
 
-  -- Best-effort fallback
-  if symbol:sub(1, #prefix) == prefix then
-    return 'cpp/container/' .. name
+  if is_std then
+    -- Handle nested namespaces vs class members
+    if name:find('::') then
+      local parts = vim.split(name, '::', { plain = true })
+      local head = parts[1]
+
+      -- Check if 'head' is a known std namespace
+      local namespaces = { 'chrono', 'filesystem', 'ranges', 'atomic', 'execution' }
+      local is_ns = false
+      for _, ns in ipairs(namespaces) do
+        if head == ns then is_ns = true break end
+      end
+
+      if is_ns then
+        -- It's a nested namespace: std::chrono::system_clock -> cpp/chrono/system_clock
+        return 'cpp/' .. table.concat(parts, '/')
+      else
+        -- It's likely a class member: std::vector::push_back -> resolve std::vector
+        return resolve_cpp_url('std::' .. head)
+      end
+    end
+
+    -- Category-based fallback
+    for cat, symbols in pairs(CPP_CATEGORIES) do
+      for _, s in ipairs(symbols) do
+        if s == name then
+          return 'cpp/' .. cat .. '/' .. s
+        end
+      end
+    end
+
+    -- Fallback for any std:: member: std::something -> cpp/something
+    return 'cpp/' .. name
   end
 
+  -- 3. Pure namespace fallback
+  local common_namespaces = { 'chrono', 'filesystem', 'ranges', 'atomic', 'execution' }
+  for _, ns in ipairs(common_namespaces) do
+    if name == ns then
+      return 'cpp/' .. ns
+    end
+  end
+
+  -- 4. C fallback
   return 'c/' .. name
 end
 
 -- Cache for external documentation
 local external_docs_cache = {}
 
----@param html string
----@return string|nil
-local function extract_main_content(html)
-  local start_idx = html:find('<div id="mw-content-text"')
-  if not start_idx then
-    return nil
-  end
-  start_idx = html:find('>', start_idx)
-  if not start_idx then
-    return nil
-  end
-  start_idx = start_idx + 1
-
-  local end_idx = html:find('</div>', start_idx)
-  if not end_idx then
-    return nil
-  end
-
-  return html:sub(start_idx, end_idx)
-end
-
-local HTML_REPLACEMENTS = {
-  -- Block elements
-  { '<h1[^>]*>', '# ' },
-  { '</h1>', '\n' },
-  { '<h2[^>]*>', '## ' },
-  { '</h2>', '\n' },
-  { '<h3[^>]*>', '### ' },
-  { '</h3>', '\n' },
-  { '<h4[^>]*>', '#### ' },
-  { '</h4>', '\n' },
-  { '<h5[^>]*>', '##### ' },
-  { '</h5>', '\n' },
-  { '<h6[^>]*>', '###### ' },
-  { '</h6>', '\n' },
-  { '<p[^>]*>', '\n' },
-  { '</p>', '\n' },
-  { '<ul[^>]*>', '\n' },
-  { '</ul>', '\n' },
-  { '<ol[^>]*>', '\n' },
-  { '</ol>', '\n' },
-  { '<li[^>]*>', '- ' },
-  { '</li>', '\n' },
-  { '<pre[^>]*>', '```\n' },
-  { '</pre>', '\n```\n' },
-  { '<code[^>]*>', '`' },
-  { '</code>', '`' },
-  { '<table[^>]*>', '\n' },
-  { '</table>', '\n' },
-  { '<thead[^>]*>', '\n' },
-  { '</thead>', '\n' },
-  { '<tbody[^>]*>', '\n' },
-  { '</tbody>', '\n' },
-  { '<tr[^>]*>', '\n' },
-  { '</tr>', '\n' },
-  { '<th[^>]*>', '| ' },
-  { '</th>', ' |' },
-  { '<td[^>]*>', '| ' },
-  { '</td>', ' |' },
-  { '<hr[%s/>]*>', '\n---\n' },
-  { '<br[%s/>]*>', '\n' },
-  { '<div[^>]*>', '\n' },
-  { '</div>', '\n' },
-  { '<span[^>]*>', '' },
-  { '</span>', '' },
-  -- Emphasis
-  { '<strong[^>]*>', '**' },
-  { '</strong>', '**' },
-  { '<b[^>]*>', '**' },
-  { '</b>', '**' },
-  { '<em[^>]*>', '*' },
-  { '</em>', '*' },
-  { '<i[^>]*>', '*' },
-  { '</i>', '*' },
-  { '<del[^>]*>', '~~' },
-  { '</del>', '~~' },
-  { '<ins[^>]*>', '__' },
-  { '</ins>', '__' },
-  { '<mark[^>]*>', '==' },
-  { '</mark>', '==' },
-}
-
-local ENTITY_REPLACEMENTS = {
-  ['&lt;'] = '<',
-  ['&gt;'] = '>',
-  ['&amp;'] = '&',
-  ['&quot;'] = '"',
-  ['&#39;'] = "'",
-  ['&nbsp;'] = ' ',
-  ['&ldquo;'] = '"',
-  ['&rdquo;'] = '"',
-  ['&lsquo;'] = "'",
-  ['&rsquo;'] = "'",
-}
-
----@param content string
----@return string[]|nil
-local function convert_html_to_markdown(content)
-  -- Remove high-noise elements first
-  content = content
-    :gsub('<script[^>]*>.*?</script>', '')
-    :gsub('<style[^>]*>.*?</style>', '')
-    :gsub('<nav[^>]*>.*?</nav>', '')
-    :gsub('<header[^>]*>.*?</header>', '')
-    :gsub('<footer[^>]*>.*?</footer>', '')
-    :gsub('<aside[^>]*>.*?</aside>', '')
-    :gsub('<!--.*?-->', '')
-
-  -- Apply table-driven replacements
-  for _, rep in ipairs(HTML_REPLACEMENTS) do
-    content = content:gsub(rep[1], rep[2])
-  end
-
-  -- Handle links: <a href="URL">TEXT</a> -> TEXT (URL)
-  content = content:gsub('<a[^>]*href="([^"]*)"[^>]*>([^<]*)</a>', '%2 (%1)')
-  content = content:gsub('<a[^>]*>[^<]*</a>', '')
-
-  -- Strip any remaining tags
-  content = content:gsub('<[^>]+>', '')
-
-  -- Decode entities
-  for ent, val in pairs(ENTITY_REPLACEMENTS) do
-    content = content:gsub(ent, val)
-  end
-
-  local lines = {}
-  for line in content:gmatch('[^\n]+') do
-    line = line:gsub('^%s+', ''):gsub('%s+$', '')
-    if line ~= '' then
-      table.insert(lines, line)
-    end
-  end
-
-  -- Clean up consecutive empty lines (max 2)
-  local i = 2
-  while i <= #lines do
-    if lines[i] == '' and lines[i - 1] == '' and lines[i - 2] == '' then
-      table.remove(lines, i)
-    else
-      i = i + 1
-    end
-  end
-
-  while #lines > 0 and lines[1] == '' do
-    table.remove(lines, 1)
-  end
-  while #lines > 0 and lines[#lines] == '' do
-    table.remove(lines)
-  end
-
-  if #lines > 30 then
-    lines = { table.unpack(lines, 1, 30) }
-    table.insert(lines, '')
-    table.insert(lines, '... (truncated for brevity)')
-  end
-
-  return #lines > 0 and lines or nil
-end
-
--- Fetch external documentation from cppreference.com
+-- Fetch curated external documentation.
 ---@param symbol string
 ---@param callback fun(lines: string[]|nil)
 local function fetch_external_docs(symbol, callback)
@@ -845,42 +1129,24 @@ local function fetch_external_docs(symbol, callback)
     return
   end
 
-  local page = resolve_cpp_url(symbol)
-  if not page then
-    external_docs_cache[symbol] = false
-    callback(nil)
+  local curated = CURATED_CPP_DOCS[symbol]
+  if curated then
+    external_docs_cache[symbol] = curated
+    callback(curated)
     return
   end
 
-  local url = 'https://en.cppreference.com/w/' .. page .. '?printable=yes'
-
-  vim.system({ 'curl', '-s', '-L', '--max-time', '8', url }, {}, function(obj)
-    if obj.code ~= 0 or not obj.stdout or obj.stdout == '' then
-      external_docs_cache[symbol] = false
-      callback(nil)
-      return
-    end
-
-    local content = extract_main_content(obj.stdout)
-    if not content then
-      external_docs_cache[symbol] = false
-      callback(nil)
-      return
-    end
-
-    local lines = convert_html_to_markdown(content)
-    external_docs_cache[symbol] = lines
-    callback(lines)
-  end)
+  external_docs_cache[symbol] = false
+  callback(nil)
 end
 
 -- Return the identifier whose character span contains col (0-indexed).
--- Handles # for preprocessor directives.
+-- Handles # for preprocessor directives and :: for C++ namespaces.
 -- Identical structure to word_containing() in java.lua.
 local function word_containing(line_text, col)
   local pos = 1
   while true do
-    local s, e = line_text:find('[%a_#][%w_]*', pos)
+    local s, e = line_text:find('[%a_#][%w_:]*', pos)
     if not s then
       break
     end
@@ -903,7 +1169,7 @@ end
 --
 -- Two fast paths mirror java.lua:
 --   1. No doxygen markers → strip blanks and return plain prose.
---   2ات la markers → full parse into **Parameters**, **Returns**, etc.
+--   2. markers → full parse into **Parameters**, **Returns**, etc.
 ---@param raw string
 ---@return string[]|nil
 local function format_docs(raw)
@@ -985,7 +1251,7 @@ local function format_docs(raw)
     line = line:gsub('<a [^>]+>(.-)</a>', '%1')
     line = line:gsub('%%([%a_][%w_:]*)', '`%1`')
 
-    local skip = line:match('^%s*[@\\]ingroup%s')
+    local skip = line:match('^%s*[@\\]ingroupL%s')
       or line:match('^%s*[@\\]headerfile%s')
       or line:match('^%s*[@\\]file%s')
       or line:match('^%s*[@\\]since%s')
@@ -1190,7 +1456,7 @@ local function retry_at_symbol(bufnr, params, ft, cb)
   local new_col
   local pos = 1
   while true do
-    local s, e = line_text:find('[%a_][%w_]*', pos)
+    local s, e = line_text:find('[%a_#][%w_:]*', pos)
     if not s then
       break
     end
@@ -1252,7 +1518,7 @@ local function fetch_hover(bufnr, params, ft, cb)
         false
       )[1] or ''
       if
-        is_keyword(ft, util.word_containing(line_text, col, '[%a_#][%w_]*'))
+        is_keyword(ft, util.word_containing(line_text, col, '[%a_#][%w_:]*'))
       then
         cb(nil, nil)
         return
@@ -1268,7 +1534,7 @@ end
 -- Fetch supertypes and subtypes via a single prepareTypeHierarchy call.
 -- on_super and on_subs are each guaranteed to be called exactly once.
 -- The stray tick() upvalue that existed in the previous version has been removed;
--- callers handle their own tick() calls.
+-- callers handle their tick() calls.
 ---@param bufnr integer
 ---@param params table
 ---@param cfg table
@@ -1424,6 +1690,9 @@ end
 ---@param opts table
 ---@param done fun(data: table)
 function M.enrich(bufnr, opts, done)
+  if require('linus').config.debug then
+    vim.notify('[linus] enrich called', vim.log.levels.INFO)
+  end
   local params = util.pos_params(bufnr)
   local cfg = require('linus').config
   local ft = vim.bo[bufnr].filetype
@@ -1437,7 +1706,7 @@ function M.enrich(bufnr, opts, done)
     line_nr + 1,
     false
   )[1] or ''
-  local word = util.word_containing(line_text, col, '[%a_#][%w_]*')
+  local word = util.word_containing(line_text, col, '[%a_#][%w_:]*')
 
   -- Fast-path for keywords: skip all LSP work and let main.lua serve the
   -- built-in reference.  Must happen before any request fires.
@@ -1451,6 +1720,10 @@ function M.enrich(bufnr, opts, done)
   local fetch_external = cfg.sections.external_docs
     and word
     and (word:find('^std::') ~= nil or CPP_PAGE_MAPPING[word] ~= nil)
+
+  if cfg.debug then
+    vim.notify(string.format('[linus] enrich: word=%s, fetch_external=%s', tostring(word), tostring(fetch_external)), vim.log.levels.INFO)
+  end
 
   -- Six async slots — barrier must be reached exactly 6 times:
   --   1. hover

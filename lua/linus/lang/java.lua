@@ -96,7 +96,135 @@ local function format_docs(raw)
   return #out > 0 and out or nil
 end
 
--- ── Keyword detection ──────────────────────────────────────────────────────────
+-- ── Curated External Documentation ──────────────────────────────────────────────────
+
+local CURATED_JAVA_DOCS = {
+  ['ArrayList'] = {
+    '**Dynamic Array**',
+    'A resizable-array implementation of the `List` interface.',
+    '',
+    '- **Access**: `O(1)` random access.',
+    '- **Insertion/Deletion**: `O(1)` amortized at the end; `O(n)` elsewhere.',
+    '- **Storage**: Contiguous memory block.',
+    '',
+    'Common methods: `add()`, `get()`, `remove()`, `size()`, `clear()`.',
+  },
+  ['HashMap'] = {
+    '**Hash Table**',
+    'A map based on a hash table, providing fast lookups.',
+    '',
+    '- **Complexity**: `O(1)` average case for get, put, and remove.',
+    '- **Ordering**: No guaranteed order of keys.',
+    '',
+    'Common methods: `put()`, `get()`, `containsKey()`, `remove()`, `entrySet()`.',
+  },
+  ['HashSet'] = {
+    '**Hash Set**',
+    'A collection that contains no duplicate elements, backed by a `HashMap`.',
+    '',
+    '- **Complexity**: `O(1)` average case for add, remove, and contains.',
+    '',
+    'Common methods: `add()`, `remove()`, `contains()`, `clear()`.',
+  },
+  ['Optional'] = {
+    '**Optional Value**',
+    'A container object which may or may not contain a non-null value.',
+    '',
+    '- **Purpose**: Explicitly represent the absence of a value to avoid `NullPointerException`.',
+    '- **Nature**: Immutable value container.',
+    '',
+    'Common methods: `isPresent()`, `orElse()`, `orElseGet()`, `ifPresent()`, `map()`.',
+  },
+  ['Stream'] = {
+    '**Sequence Processor**',
+    'A sequence of elements supporting sequential and parallel aggregate operations.',
+    '',
+    '- **Pipeline**: source $\to$ intermediate (filter, map) $\to$ terminal (collect, reduce).',
+    '- **Evaluation**: Lazy; intermediate operations are not executed until a terminal operation is called.',
+    '',
+    'Common methods: `filter()`, `map()`, `flatMap()`, `sorted()`, `collect()`, `reduce()`.',
+  },
+  ['String'] = {
+    '**Immutable Sequence**',
+    'A sequence of characters that is immutable and supports interning.',
+    '',
+    '- **Nature**: Once created, the value cannot be changed.',
+    '- **String Pool**: Literal strings are stored in a common pool to save memory.',
+    '',
+    'Common methods: `substring()`, `indexOf()`, `replace()`, `split()`, `trim()`.',
+  },
+  ['StringBuilder'] = {
+    '**Mutable String**',
+    'A mutable sequence of characters for efficient string concatenation.',
+    '',
+    '- **Performance**: Far more efficient than `String` concatenation in loops.',
+    '- **Thread Safety**: Not thread-safe; use `StringBuffer` for multi-threaded environments.',
+    '',
+    'Common methods: `append()`, `insert()`, `delete()`, `reverse()`, `toString()`.',
+  },
+  ['ConcurrentHashMap'] = {
+    '**Thread-Safe Map**',
+    'A highly concurrent hash map with fine-grained locking.',
+    '',
+    '- **Performance**: High scalability under contention; does not lock the entire map.',
+    '- **Ordering**: No guaranteed order.',
+    '',
+    'Common methods: `putIfAbsent()`, `computeIfAbsent()`, `merge()`.',
+  },
+  ['CompletableFuture'] = {
+    '**Async Future**',
+    'A future that can be manually completed and supports callback chaining.',
+    '',
+    '- **Concurrency**: Usually runs tasks in the `ForkJoinPool.commonPool()` by default.',
+    '- **Composition**: Supports `thenApply()`, `thenCompose()`, and `thenCombine()`.',
+    '',
+    'Common methods: `supplyAsync()`, `thenAccept()`, `get()`, `join()`, `complete()`.',
+  },
+}
+
+local JAVA_QUALIFIED_NAMES = {
+  ArrayList = 'java.util.ArrayList',
+  HashMap = 'java.util.HashMap',
+  HashSet = 'java.util.HashSet',
+  Optional = 'java.util.Optional',
+  Stream = 'java.util.stream.Stream',
+  String = 'java.lang.String',
+  StringBuilder = 'java.lang.StringBuilder',
+  ConcurrentHashMap = 'java.util.concurrent.ConcurrentHashMap',
+  CompletableFuture = 'java.util.concurrent.CompletableFuture',
+  LinkedList = 'java.util.LinkedList',
+  PriorityQueue = 'java.util.PriorityQueue',
+  Collections = 'java.util.Collections',
+  Arrays = 'java.util.Arrays',
+}
+
+local function resolve_java_url(symbol)
+  if not symbol or symbol == '' then return nil end
+  local qualified = JAVA_QUALIFIED_NAMES[symbol]
+  if not qualified then return nil end
+
+  local path = qualified:gsub('%.', '/')
+  return 'https://docs.oracle.com/en/java/javase/21/docs/api/java.base/' .. path .. '.html'
+end
+
+local external_docs_cache = {}
+
+local function fetch_external_docs(symbol, callback)
+  if external_docs_cache[symbol] ~= nil then
+    callback(external_docs_cache[symbol])
+    return
+  end
+
+  local curated = CURATED_JAVA_DOCS[symbol]
+  if curated then
+    external_docs_cache[symbol] = curated
+    callback(curated)
+    return
+  end
+
+  external_docs_cache[symbol] = false
+  callback(nil)
+end
 
 -- All Java keywords that jdtls returns empty hover for.
 -- "return" must be quoted because it is a Lua reserved word.
@@ -242,21 +370,20 @@ function M.enrich(bufnr, opts, done)
   local params = util.pos_params(bufnr)
   local cfg    = require("linus").config
 
-  -- Fast-path for keywords: skip all LSP work and let main.lua serve the
-  -- built-in reference. Must happen before any request fires, because
-  -- prepareTypeHierarchy can return "Extends Object" even for keyword positions,
-  -- which would make data non-empty and bypass the keyword lookup.
   local line_nr   = params.position.line
   local col       = params.position.character
   local line_text = vim.api.nvim_buf_get_lines(bufnr, line_nr, line_nr + 1, false)[1] or ""
-  if JAVA_KEYWORDS[word_containing(line_text, col)] then
+  local word = util.word_containing(line_text, col, "[%a_$][%w_$]*")
+
+  -- Fast-path for keywords
+  if word and JAVA_KEYWORDS[word] then
     done({})
     return
   end
 
-  -- Three async results: hover, supertypes, subtypes.
+  -- Four async results: hover, supertypes, subtypes, external docs.
   local data = {}
-  local tick = util.barrier(3, function() done(data) end)
+  local tick = util.barrier(4, function() done(data) end)
 
   fetch_hover(bufnr, params, function(sig_lines, doc_lines)
     data.signature = sig_lines
@@ -275,6 +402,18 @@ function M.enrich(bufnr, opts, done)
       tick()
     end
   )
+
+  -- External documentation slot
+  if cfg.sections.external_docs and word then
+    fetch_external_docs(word, function(lines)
+      if lines then
+        data.external_docs = lines
+      end
+      tick()
+    end)
+  else
+    tick()
+  end
 end
 
 return M

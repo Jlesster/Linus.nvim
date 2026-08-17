@@ -8,6 +8,7 @@ bundled keyword reference as a fallback when LSP returns nothing.
 
 - [hover.nvim](https://github.com/lewis6991/hover.nvim)
 - One or more of: `jdtls`, `gopls`, `clangd` attached to a buffer
+- _This will not work with snacks.nvim, I do not know why. Telescope is stable_.
 
 ## Installation
 
